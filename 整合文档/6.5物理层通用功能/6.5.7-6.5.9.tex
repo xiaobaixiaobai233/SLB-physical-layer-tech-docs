@@ -1,0 +1,605 @@
+% !TEX program = xelatex
+\documentclass[11pt,a4paper]{ctexart}
+
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{longtable}
+
+\geometry{left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm}
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  backgroundcolor=\color{gray!8},
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false
+}
+
+\newcommand{\NGPID}{N_{\mathrm{G-PID}}}
+
+\title{%
+  \textbf{星闪 SLB 物理层}\\[0.4em]
+  \Large 6.5.7\textasciitilde 6.5.9 比特加扰、波形生成与序列技术文档\\[0.3em]
+  \large 比特加扰 \textbullet\ SC-FDMA 波形 \textbullet\ Zadoff-Chu 序列 \textbullet\ 序列组跳
+}
+\author{依据 T/XS 10001-2025《星闪无线通信系统 接入层\\
+同步低时延宽带空口 SLB 技术要求和测试方法》整理\\
+（团体标准 20250326 版）\\[0.5em]
+代码文件：\texttt{slb\_phy\_scram.h} / \texttt{slb\_phy\_scfdma.h} / \texttt{slb\_phy\_zc.h}}
+\date{}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+%======================================================================
+\section{协议章节对应}
+%======================================================================
+
+本节对应星闪 SLB 接入层物理层协议 T/XS 10001-2025 第 6.5 节``共性基础算法''中下列子节：
+\begin{itemize}[nosep]
+  \item \textbf{6.5.7} 比特加扰——编码/速率匹配后比特与 Gold 序列模 2 加，$c_{\mathrm{init}}=n_f\cdot 2^{24}+\NGPID$；
+  \item \textbf{6.5.8} SC-FDMA 波形生成——调制符号按 SC-FDMA 符号分段 DFT 预编码，输出 $y(n)$；
+  \item \textbf{6.5.9} Zadoff-Chu 序列——基序列 $r_{u,v}(n)$ 与循环移位 $\alpha$ 生成 DMRS 等参考序列；
+  \item \textbf{6.5.9.1} 序列组跳——由 Gold 序列派生时隙相关组号 $u=(f_{\mathrm{gh}}(n_S)+f_{\mathrm{SS}})\bmod 30$。
+\end{itemize}
+
+%======================================================================
+\section{功能定义}
+%======================================================================
+
+本模块组为 SLB 120\,kHz 物理层提供\textbf{比特域加扰}、\textbf{SC-FDMA 预编码}与\textbf{ZC 参考序列生成}三类共性算法。不规定 CRC、信道编码、调制星座或资源网格位置，只规定上述三阶段的\textbf{输入输出关系与闭式公式}。
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lllll}
+\toprule
+\textbf{节号} & \textbf{名称} & \textbf{输入} & \textbf{输出} & \textbf{典型链路用途} \\
+\midrule
+6.5.7 & 比特加扰 & $t_i$、$c_{\mathrm{init}}$ & $\tilde{t}_i$ & 6.2.5 数据 TB、6.3.3 深覆盖业务 \\
+6.5.8 & SC-FDMA 预编码 & $x(n)$ 符号块 & $y(n)$ & 6.3.3 广播/控制/数据 SC-FDMA \\
+6.5.9 & ZC 序列 & $u,v,\alpha,m$ & $r_{u,v}^{(\alpha)}(n)$ & 6.3.3.2.2 DMRS \\
+6.5.9.1 & 序列组跳 & $n_S$、$n_{\mathrm{ID}}^{X}$ & $u$ & ZC 组号时变 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{与 6.5.2/6.5.3 的边界}：6.5.2 Gold 序列为底层引擎；6.5.3 将 Gold 映射为 QPSK 参考信号；6.5.7/6.5.9.1 使用\textbf{不同} $c_{\mathrm{init}}$ 调用同一 Gold 生成器，不得与 6.5.3 接口混用。
+
+%======================================================================
+\section{模块边界（上下游及职责划分）}
+%======================================================================
+
+\subsection{上游模块（输入来源）}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{4.2cm}p{4.5cm}p{5.5cm}}
+\toprule
+\textbf{上游模块} & \textbf{输入给本模块的内容} & \textbf{说明} \\
+\midrule
+信道编码/速率匹配（6.2.6） & 比特 $g_k$ 或 $t_i$ & 6.5.7 加扰输入 \\
+调度/RRC & $\NGPID$、起始无线帧索引 & 计算 $n_f$ 与 $c_{\mathrm{init}}$ \\
+Gold 序列（6.5.2） & $c(i)$ 比特流 & 加扰与组跳共用引擎 \\
+调制（6.5.6） & 复数符号 $x(n)$ 或 $d(i)$ & 6.5.8 预编码输入 \\
+系统/业务配置 & $N_{\mathrm{ID}}^{\mathrm{TS}}$、510、高层 $c_{\mathrm{init}}$ & 6.3.3 特例 \\
+DMRS 调度 & $m$、$\alpha$、$n_{\mathrm{ID}}^{X}$、时隙 $n_S$ & 6.5.9/6.5.9.1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{下游模块（输出去向）}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{4.2cm}p{4.5cm}p{5.5cm}}
+\toprule
+\textbf{下游模块} & \textbf{本模块输出} & \textbf{说明} \\
+\midrule
+调制（6.5.6） & $\tilde{g}_k$ & 6.5.7 加扰后比特 \\
+资源映射（6.2.3/6.3.3） & $y(n)$ & SC-FDMA 预编码符号 \\
+DMRS 映射（6.3.3.2.2） & $r_{u,v}^{(\alpha)}(n)$ & 再经 OCC $w(m)$ 与 $\beta_{\mathrm{RS}}$ \\
+接收解扰 & 恢复 $t_i$ & 与发送相同 $c_{\mathrm{init}}$ 再 XOR \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{本模块不负责的内容}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{5.5cm}p{8.5cm}}
+\toprule
+\textbf{不负责内容} & \textbf{原因} \\
+\midrule
+Gold 序列 LFSR 实现 & 由 6.5.2 负责 \\
+QPSK 参考信号（6.5.3） & 独立 $c_{\mathrm{init}}$ 与映射 \\
+调制星座映射（6.5.6） & 加扰在调制之前 \\
+IFFT/CP/上变频（6.3.3.6） & 6.5.8 仅 DFT 预编码 \\
+表 16 常量维护 & 工程 ROM，标准给定 \\
+资源网格 RE 位置 & 由 6.2.3/6.3.3 负责 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{在 SLB 通信流程中的角色}
+%======================================================================
+
+\begin{itemize}
+  \item \textbf{6.2.5 数据 TB}：编码 $\rightarrow$ \textbf{6.5.7 加扰} $\rightarrow$ 6.5.6 调制 $\rightarrow$ 资源映射；
+  \item \textbf{6.3.3 深覆盖}：CRC + \textbf{6.5.7 加扰} $\rightarrow$ 6.5.6 调制 $\rightarrow$ \textbf{6.5.8 SC-FDMA} $\rightarrow$ 资源映射；并行生成 \textbf{6.5.9 DMRS}；
+  \item \textbf{6.3.3.2.2 解调参考信号}：6.5.9.1 组跳得 $u$ $\rightarrow$ 6.5.9 基序列 + $\alpha$ $\rightarrow$ OCC 与功率因子映射。
+\end{itemize}
+
+\textbf{推荐复用策略}：维护 \texttt{slb\_phy\_scram}、\texttt{slb\_phy\_scfdma}、\texttt{slb\_phy\_zc} 三个子模块；Gold 生成统一调用 \texttt{slb\_pn\_gold\_generate}（6.5.2）。
+
+%======================================================================
+\section{强制要求与关键参数}
+%======================================================================
+
+\subsection{6.5.7 比特加扰}
+
+输入 $t_0,\ldots,t_K$，输出 $\tilde{t}_0,\ldots,\tilde{t}_K$：
+\begin{equation}
+  \tilde{t}_i = (t_i + c(i)) \bmod 2
+  \label{eq:scramble}
+\end{equation}
+$c(i)$ 由 6.5.2 Gold 序列生成；数据 TB 默认：
+\begin{equation}
+  c_{\mathrm{init}} = n_f \cdot 2^{24} + \NGPID
+  \label{eq:cinit_scramble}
+\end{equation}
+$n_f$：数据起始无线帧索引低 7 位；$\NGPID$：G 节点物理层标识。
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llp{7cm}}
+\toprule
+\textbf{符号} & \textbf{类型/范围} & \textbf{含义} \\
+\midrule
+$t_i,\tilde{t}_i$ & $\{0,1\}$ & 加扰前/后比特 \\
+$c(i)$ & $\{0,1\}$ & Gold 伪随机比特 \\
+$c_{\mathrm{init}}$ & \texttt{uint32\_t} & Gold 初始化参数 \\
+$n_f$ & 7 bit & 无线帧索引 $\bmod 128$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{6.3.3 加扰 $c_{\mathrm{init}}$ 特例}：
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{业务} & \textbf{$c_{\mathrm{init}}$} & \textbf{标准位置} \\
+\midrule
+系统广播 & $N_{\mathrm{ID}}^{\mathrm{TS}}$ & 6.3.3.3 \\
+控制信息 & $510$ & 6.3.3.4 \\
+物理层数据 & 高层配置 & 6.3.3.5 \\
+第一类/第二类数据 & 式\eqref{eq:cinit_scramble} & 6.2.5 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{6.5.8 SC-FDMA 波形生成}
+
+符号块 $x(0),\ldots,x(M_{\mathrm{symb}}-1)$ 分成 $L=M_{\mathrm{symb}}/M_{\mathrm{SC}}^{\mathrm{Total}}$ 段，每段长度 $M_{\mathrm{SC}}^{\mathrm{Total}}=M_{\mathrm{SCG},1} N_{\mathrm{SCG},1}$，且 $M_{\mathrm{SCG},1}=2^{\alpha_2}3^{\alpha_3}5^{\alpha_5}$。
+
+对 $l=0,\ldots,L-1$，$k=0,\ldots,M_{\mathrm{SC}}^{\mathrm{Total}}-1$：
+\begin{equation}
+  y\!\left(l M + k\right)
+  = \frac{1}{\sqrt{M}}
+  \sum_{i=0}^{M-1}
+  x(l M + i)\,
+  e^{-\mathrm{j} 2\pi i k / M}
+  \label{eq:scfdma}
+\end{equation}
+其中 $M=M_{\mathrm{SC}}^{\mathrm{Total}}$。输出 $y(0),\ldots,y(M_{\mathrm{symb}}-1)$。
+
+\subsection{6.5.9 Zadoff-Chu 序列}
+
+循环移位形式：
+\begin{equation}
+  r_{u,v}^{(\alpha)}(n) = e^{\mathrm{j}\alpha n}\, r_{u,v}(n),\quad 0 \leq n < M_{\mathrm{SC}}^{\mathrm{RS}}
+  \label{eq:zc_shift}
+\end{equation}
+$M_{\mathrm{SC}}^{\mathrm{RS}}=m N_{\mathrm{SCG},1}$，$1 \leq m \leq \lfloor N_{\mathrm{sc}}^{\mathrm{Total}}/N_{\mathrm{SCG},3}\rfloor$。
+
+\textbf{基序列 $r_{u,v}(n)$}：$u\in\{0,\ldots,29\}$；$1\leq m\leq 5$ 时仅 $v=0$；$6\leq m\leq \lfloor N_{\mathrm{sc}}^{\mathrm{Total}}/N_{\mathrm{SCG},1}\rfloor$ 时 $v\in\{0,1\}$。
+
+\textbf{$m=2$}：查标准\textbf{表 16}（30 组 $\exp(\pm \mathrm{j}k\pi/4)$ 相位序列），不得用 ZC 公式。
+
+\textbf{$m>3$}：
+\begin{align}
+  r_{u,v}(n) &= x_q(n \bmod N_{\mathrm{ZC}}^{\mathrm{RS}}) \\
+  x_q(m) &= \exp\!\left(-\mathrm{j}\frac{\pi q\, m(m+1)}{N_{\mathrm{ZC}}^{\mathrm{RS}}}\right) \\
+  \bar{q} &= N_{\mathrm{ZC}}^{\mathrm{RS}}(u+1)/31 \\
+  q &= \lfloor \bar{q} + \tfrac{1}{2}\rfloor + v\cdot(-1)^{\lfloor 2\bar{q}\rfloor}
+\end{align}
+$N_{\mathrm{ZC}}^{\mathrm{RS}}$：小于 $M_{\mathrm{SC}}^{\mathrm{RS}}$ 的最大质数。
+
+\subsection{6.5.9.1 序列组跳}
+
+\begin{equation}
+  u = (f_{\mathrm{gh}}(n_S) + f_{\mathrm{SS}}) \bmod 30
+  \label{eq:group_hop}
+\end{equation}
+\begin{align}
+  f_{\mathrm{gh}}(n_S) &= \Bigl(\sum_{i=0}^{7} c(8n_S+i)\,2^i\Bigr) \bmod 30 \\
+  f_{\mathrm{SS}} &= \lfloor n_{\mathrm{ID}}^{X}/16\rfloor \bmod 30 \\
+  c_{\mathrm{init}} &= \lfloor n_{\mathrm{ID}}^{X}/30\rfloor
+\end{align}
+
+\subsection{DMRS 组合（6.3.3.2.2 引用）}
+
+\begin{equation}
+  r(m M_{\mathrm{RS}} + n) = w(m)\, r_{u,v}^{(\alpha)}(n)
+\end{equation}
+$w(m)$ 依广播/控制/数据及 $n_{\mathrm{ID}}^{X}\bmod 2$ 取 $\pm1$ 组合；映射 $a_{k,l}=\_{\mathrm{RS}} r_{n,l}(k)$。
+
+\subsection{Gold $c_{\mathrm{init}}$ 三场景对照}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{场景} & \textbf{标准节} & \textbf{$c_{\mathrm{init}}$} \\
+\midrule
+QPSK 参考信号 & 6.5.3 & $n,l,\mathrm{G\text{-}ID},\mathrm{CP}$ 组合 \\
+比特加扰 & 6.5.7 & $n_f\cdot 2^{24}+\NGPID$ \\
+ZC 组跳 & 6.5.9.1 & $\lfloor n_{\mathrm{ID}}^{X}/30\rfloor$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{数据类型、长度/维度}
+%======================================================================
+
+\subsection{加扰 \texttt{slb\_phy\_scram}}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{变量} & \textbf{类型} & \textbf{长度} & \textbf{说明} \\
+\midrule
+\texttt{bits\_in[]} & \texttt{const uint8\_t *} & $K{+}1$ & 输入 $t_i\in\{0,1\}$ \\
+\texttt{bits\_out[]} & \texttt{uint8\_t *} & $K{+}1$ & 输出 $\tilde{t}_i$ \\
+\texttt{N\_bit} & \texttt{uint32\_t} & 1 & 比特数 \\
+\texttt{c\_init} & \texttt{uint32\_t} & 1 & Gold 初始化 \\
+\texttt{scram\_ctx} & \texttt{slb\_gold\_ctx\_t} & 1 & 可选：复用 6.5.2 上下文 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{SC-FDMA \texttt{slb\_phy\_scfdma}}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{变量} & \textbf{类型} & \textbf{长度} & \textbf{说明} \\
+\midrule
+\texttt{x[]} & \texttt{const slb\_cplx\_t *} & $M_{\mathrm{symb}}$ & 调制符号输入 \\
+\texttt{y[]} & \texttt{slb\_cplx\_t *} & $M_{\mathrm{symb}}$ & 预编码输出 \\
+\texttt{M\_sc\_total} & \texttt{uint16\_t} & 1 & $M_{\mathrm{SC}}^{\mathrm{Total}}$ \\
+\texttt{N\_sym} & \texttt{uint32\_t} & 1 & $L=M_{\mathrm{symb}}/M_{\mathrm{sc\_total}}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{ZC 序列 \texttt{slb\_phy\_zc}}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{变量} & \textbf{类型} & \textbf{长度} & \textbf{说明} \\
+\midrule
+\texttt{u} & \texttt{uint8\_t} & 1 & 组号 $0\ldots 29$ \\
+\texttt{v} & \texttt{uint8\_t} & 1 & 基序列号 $0$ 或 $1$ \\
+\texttt{alpha} & \texttt{float} & 1 & 循环移位（弧度/样点） \\
+\texttt{m} & \texttt{uint8\_t} & 1 & 长度因子 \\
+\texttt{seq[]} & \texttt{slb\_cplx\_t *} & $M_{\mathrm{RS}}$ & 输出 $r_{u,v}^{(\alpha)}(n)$ \\
+\texttt{n\_s} & \texttt{uint32\_t} & 1 & 时隙（组跳） \\
+\texttt{n\_id\_x} & \texttt{uint32\_t} & 1 & $n_{\mathrm{ID}}^{X}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{时序关系}
+%======================================================================
+
+\begin{itemize}[nosep]
+  \item \textbf{6.2.5 数据}：编码完成 $\rightarrow$ 6.5.7 加扰 $\rightarrow$ 6.5.6 调制 $\rightarrow$ 映射（无 6.5.8）；
+  \item \textbf{6.3.3 深覆盖}：加扰 $\rightarrow$ 调制 $\rightarrow$ \textbf{6.5.8} 预编码 $\rightarrow$ 映射；
+  \item \textbf{DMRS}：可在帧内并行生成；组跳 $u$ 随 $n_S$ 变化，须在生成 $r_{u,v}$ 前更新 $u$；
+  \item \textbf{解扰}：接收译码前，与发送相同 $c_{\mathrm{init}}$ 再执行式\eqref{eq:scramble}。
+\end{itemize}
+
+%======================================================================
+\section{接口表格（明确的输入/输出）}
+%======================================================================
+
+\subsection{\texttt{slb\_scram\_apply}}
+
+\begin{longtable}{p{2.5cm}p{2.5cm}p{1.5cm}p{1.5cm}p{2.5cm}p{4cm}}
+\toprule
+\textbf{参数} & \textbf{类型} & \textbf{长度} & \textbf{必需} & \textbf{来源} & \textbf{说明} \\
+\midrule
+\endhead
+\texttt{bits\_in} & \texttt{const uint8\_t *} & $N$ & 是 & 6.2.6 & 编码后比特 \\
+\texttt{bits\_out} & \texttt{uint8\_t *} & $N$ & 是 & --- & 加扰输出 \\
+\texttt{N\_bit} & \texttt{uint32\_t} & 1 & 是 & 调度 & 比特长度 \\
+\texttt{c\_init} & \texttt{uint32\_t} & 1 & 是 & 6.5.7/6.3.3 & Gold 初始化 \\
+\bottomrule
+\end{longtable}
+
+\subsection{\texttt{slb\_scfdma\_precode}}
+
+\begin{longtable}{p{2.5cm}p{2.5cm}p{1.5cm}p{1.5cm}p{2.5cm}p{4cm}}
+\toprule
+\textbf{参数} & \textbf{类型} & \textbf{长度} & \textbf{必需} & \textbf{来源} & \textbf{说明} \\
+\midrule
+\endhead
+\texttt{x} & \texttt{const slb\_cplx\_t *} & $M_{\mathrm{symb}}$ & 是 & 6.5.6 & 调制符号 \\
+\texttt{y} & \texttt{slb\_cplx\_t *} & $M_{\mathrm{symb}}$ & 是 & --- & 预编码输出 \\
+\texttt{M\_sc\_total} & \texttt{uint16\_t} & 1 & 是 & 带宽配置 & DFT 长度 \\
+\texttt{M\_symb} & \texttt{uint32\_t} & 1 & 是 & 调度 & 须被 $M_{\mathrm{sc\_total}}$ 整除 \\
+\bottomrule
+\end{longtable}
+
+\subsection{\texttt{slb\_zc\_gen} / \texttt{slb\_zc\_group\_hop}}
+
+\begin{longtable}{p{2.8cm}p{2.5cm}p{1.5cm}p{1.5cm}p{2.2cm}p{4cm}}
+\toprule
+\textbf{参数} & \textbf{类型} & \textbf{长度} & \textbf{必需} & \textbf{来源} & \textbf{说明} \\
+\midrule
+\endhead
+\texttt{u,v,alpha,m} & 各 1 & 1 & 是 & DMRS 配置 & 6.5.9 \\
+\texttt{seq} & \texttt{slb\_cplx\_t *} & $M_{\mathrm{RS}}$ & 是 & --- & 输出序列 \\
+\texttt{n\_s,n\_id\_x} & \texttt{uint32\_t} & 1 & 组跳时 & 6.3.3 & 6.5.9.1 \\
+\texttt{u\_out} & \texttt{uint8\_t *} & 1 & 组跳时 & --- & 式\eqref{eq:group_hop} \\
+\bottomrule
+\end{longtable}
+
+%======================================================================
+\section{处理步骤}
+%======================================================================
+
+\subsection{6.5.7 比特加扰（发送）}
+
+\begin{enumerate}
+  \item 按业务类型计算 $c_{\mathrm{init}}$（式\eqref{eq:cinit_scramble} 或 6.3.3 特例）；
+  \item 调用 \texttt{slb\_pn\_gold\_generate}($c_{\mathrm{init}}$, $N_{\mathrm{bit}}$) 得 $c(i)$；
+  \item 对 $i=0\ldots N_{\mathrm{bit}}-1$：$\tilde{t}_i = t_i \oplus c(i)$；
+  \item 输出送入 6.5.6 调制。
+\end{enumerate}
+
+\textbf{接收解扰}：步骤 1\textasciitilde 2 相同，$\tilde{t}_i \oplus c(i) \rightarrow t_i$。
+
+\subsection{6.5.8 SC-FDMA 预编码}
+
+\begin{enumerate}
+  \item 校验 $M_{\mathrm{symb}} \bmod M_{\mathrm{SC}}^{\mathrm{Total}} = 0$；
+  \item $L \leftarrow M_{\mathrm{symb}}/M_{\mathrm{SC}}^{\mathrm{Total}}$；
+  \item 对每个 $l=0\ldots L-1$，对输入段 $x(lM\ldots lM+M-1)$ 做 $M$ 点 DFT（式\eqref{eq:scfdma}）；
+  \item 写入 $y(lM\ldots lM+M-1)$。
+\end{enumerate}
+
+\subsection{6.5.9 ZC 基序列生成}
+
+\begin{enumerate}
+  \item 由 $m$ 判断：$m=2$ 查表 16；$m>3$ 走 ZC 闭式；
+  \item 若启用组跳：先 \texttt{slb\_zc\_group\_hop}($n_S,n_{\mathrm{ID}}^{X}$) 得 $u$；
+  \item 计算 $N_{\mathrm{ZC}}^{\mathrm{RS}}$、$q$、生成 $r_{u,v}(n)$；
+  \item 乘 $e^{\mathrm{j}\alpha n}$ 得 $r_{u,v}^{(\alpha)}(n)$。
+\end{enumerate}
+
+\subsection{6.5.9.1 序列组跳}
+
+\begin{enumerate}
+  \item $c_{\mathrm{init}} \leftarrow \lfloor n_{\mathrm{ID}}^{X}/30\rfloor$；
+  \item 生成 $c(8n_S)\ldots c(8n_S+7)$；
+  \item $f_{\mathrm{gh}} \leftarrow (\sum c_i 2^i)\bmod 30$，$f_{\mathrm{SS}} \leftarrow \lfloor n_{\mathrm{ID}}^{X}/16\rfloor \bmod 30$；
+  \item $u \leftarrow (f_{\mathrm{gh}}+f_{\mathrm{SS}})\bmod 30$。
+\end{enumerate}
+
+%======================================================================
+\section{状态机与时序}
+%======================================================================
+
+\begin{itemize}[nosep]
+  \item \textbf{加扰}：无跨 TB 状态；每 TB 按起始帧重算 $c_{\mathrm{init}}$；
+  \item \textbf{SC-FDMA}：无状态；每符号段独立 DFT；
+  \item \textbf{ZC/组跳}：$u$ 随时隙 $n_S$ 变化；同一时隙内 DMRS 复用同一 $u$；
+  \item \textbf{PHY 流水线}：态 1 编码 $\rightarrow$ 态 2 加扰 $\rightarrow$ 态 3 调制 $\rightarrow$ 态 4 SC-FDMA（若 6.3.3）$\rightarrow$ 态 5 映射。
+\end{itemize}
+
+%======================================================================
+\section{协议中允许本模块改变的参数}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{参数} & \textbf{来源} & \textbf{影响} \\
+\midrule
+$c_{\mathrm{init}}$（加扰） & 帧索引、$\NGPID$、6.3.3 业务 & 加扰序列 \\
+$M_{\mathrm{SC}}^{\mathrm{Total}}$ & 带宽/$M_{\mathrm{SCG},1}$ & DFT 长度 \\
+$u,v,\alpha,m$ & DMRS 调度 & ZC 序列 \\
+$n_S,n_{\mathrm{ID}}^{X}$ & 时隙/CRC & 组跳 $u$ \\
+浮点/定点 FFT & 工程实现 & EVM/一致性 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+PHY \textbf{不得}自行更改标准规定的 $c_{\mathrm{init}}$ 公式或 DFT 归一化因子。
+
+%======================================================================
+\section{约束与极限条件}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{4.5cm}p{9.5cm}}
+\toprule
+\textbf{约束} & \textbf{处理建议} \\
+\midrule
+加扰在调制之前 & 6.5.6 输入须为 $\tilde{g}_k$ \\
+$c_{\mathrm{init}}$ 场景不可混用 & 加扰/组跳/QPSK RS 分别计算 \\
+$M_{\mathrm{symb}}\bmod M_{\mathrm{SC}}^{\mathrm{Total}}\neq 0$ & 返回 \texttt{SLB\_PHY\_ERR\_PARAM} \\
+$m=2$ 须查表 16 & 禁止误用 ZC 公式 \\
+$m>3$ 须用质数 $N_{\mathrm{ZC}}^{\mathrm{RS}}$ & 预置质数表 \\
+组跳 $c(i)$ 与加扰 $c(i)$ 独立初始化 & 不可共用同一次 Gold 偏移 \\
+输出缓冲长度不足 & 返回 \texttt{SLB\_PHY\_ERR\_BUF} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{链路调用对照表}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{链路/信息块} & \textbf{标准位置} & \textbf{6.5.7} & \textbf{6.5.8/6.5.9} \\
+\midrule
+第一类数据 & 6.2.5.2.2 & 加扰 & --- \\
+第二类数据 & 6.2.5.3.2 & 加扰 & --- \\
+系统广播 & 6.3.3.3 & $c_{\mathrm{init}}=N_{\mathrm{ID}}^{\mathrm{TS}}$ & SC-FDMA \\
+控制信息 & 6.3.3.4 & $c_{\mathrm{init}}=510$ & SC-FDMA \\
+物理层数据 & 6.3.3.5 & 高层 $c_{\mathrm{init}}$ & SC-FDMA \\
+解调参考信号 & 6.3.3.2.2 & --- & ZC + 组跳 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{算法速查}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{功能} & \textbf{核心公式/操作} & \textbf{$c_{\mathrm{init}}$ 或关键参数} \\
+\midrule
+加扰 & $\tilde{t}_i=t_i\oplus c(i)$ & $n_f\cdot 2^{24}+\NGPID$ \\
+SC-FDMA & $M$ 点 DFT + $1/\sqrt{M}$ & $M=M_{\mathrm{SCG},1}N_{\mathrm{SCG},1}$ \\
+ZC ($m>3$) & $x_q(m)=e^{-\mathrm{j}\pi qm(m+1)/N_{\mathrm{ZC}}}$ & $q$ 由 $u,v$ \\
+组跳 & $u=(f_{\mathrm{gh}}+f_{\mathrm{SS}})\bmod 30$ & $\lfloor n_{\mathrm{ID}}^{X}/30\rfloor$ \\
+DMRS & $r(mM+n)=w(m)r_{u,v}^{(\alpha)}(n)$ & 表 16（$m=2$） \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{API 速查}
+%======================================================================
+
+\begin{lstlisting}[language=C]
+/* ---------- 6.5.7 加扰 ---------- */
+int slb_scram_apply(const uint8_t *bits_in, uint8_t *bits_out,
+                    uint32_t N_bit, uint32_t c_init);
+
+uint32_t slb_scram_cinit_data(uint8_t n_f_low7, uint32_t n_g_pid);
+
+/* ---------- 6.5.8 SC-FDMA ---------- */
+int slb_scfdma_precode(const slb_cplx_t *x, slb_cplx_t *y,
+                       uint32_t M_symb, uint16_t M_sc_total);
+
+/* ---------- 6.5.9 ZC ---------- */
+int slb_zc_group_hop(uint32_t n_s, uint32_t n_id_x, uint8_t *u_out);
+
+int slb_zc_gen(uint8_t u, uint8_t v, float alpha, uint8_t m,
+               slb_cplx_t *seq, uint16_t M_rs);
+
+int slb_zc_gen_m2_table(uint8_t u, slb_cplx_t *seq, uint16_t M_rs);
+\end{lstlisting}
+
+%======================================================================
+\section{错误码}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\begin{tabular}{cll}
+\toprule
+\textbf{宏} & \textbf{值} & \textbf{含义} \\
+\midrule
+\texttt{SLB\_PHY\_OK} & 0 & 成功 \\
+\texttt{SLB\_PHY\_ERR\_PARAM} & $-1$ & 空指针、长度不整除、非法 $u/m$ \\
+\texttt{SLB\_PHY\_ERR\_BUF} & $-2$ & 输出缓冲不足 \\
+\texttt{SLB\_PHY\_ERR\_MODE} & $-3$ & $m=2$ 与 ZC 路径混用、不支持的长度 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{工程集成说明}
+%======================================================================
+
+\subsection{文件结构}
+
+\begin{lstlisting}
+20260625-6.5.7-6.5.9-比特加扰波形生成与序列/
+  slb_phy_scram.h / slb_phy_scram.c
+  slb_phy_scfdma.h / slb_phy_scfdma.c
+  slb_phy_zc.h / slb_phy_zc.c
+  SLB物理层6.5.7-6.5.9比特加扰波形生成与序列技术文档.tex
+  SLB_6.5.7-6.5.9_比特加扰波形生成与序列_学习资料.tex
+\end{lstlisting}
+
+\subsection{与标准其他章节的衔接}
+
+\begin{itemize}[nosep]
+  \item \textbf{6.5.2}：Gold 生成器为加扰与组跳共用；
+  \item \textbf{6.5.6}：加扰输出为调制输入；调制输出为 SC-FDMA 输入；
+  \item \textbf{6.2.5}：数据路径引用 6.5.7；
+  \item \textbf{6.3.3}：深覆盖引用 6.5.7/6.5.8/6.5.9 全套；
+  \item \textbf{6.5.4}：SC-FDMA 符号映射后仍须功控（T 符号）。
+\end{itemize}
+
+\subsection{编译}
+
+\begin{lstlisting}[language=bash]
+xelatex SLB物理层6.5.7-6.5.9比特加扰波形生成与序列技术文档.tex
+cc -std=c99 -Wall -c slb_phy_scram.c slb_phy_scfdma.c slb_phy_zc.c
+\end{lstlisting}
+
+\vfill
+\begin{center}
+\small\textcolor{gray}{精确参数与字段定义以 T/XS 10001-2025 正式标准为准；本文档仅供 SLB 物理层实现与联调参考。}
+\end{center}
+
+\end{document}

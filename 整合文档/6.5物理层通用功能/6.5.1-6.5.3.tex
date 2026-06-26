@@ -1,0 +1,474 @@
+% !TEX program = xelatex
+\documentclass[11pt,a4paper]{ctexart}
+
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{longtable}
+
+\geometry{left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm}
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  backgroundcolor=\color{gray!8},
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false
+}
+
+\title{%
+  \textbf{星闪 SLB 物理层}\\[0.4em]
+  \Large 6.5.1\textasciitilde 6.5.3 共性基础算法技术文档\\[0.3em]
+  \large 循环冗余校验 \textbullet\ 伪随机序列 \textbullet\ 伪随机 QPSK 序列
+}
+\author{依据 T/XS 10001-2025《星闪无线通信系统 接入层\\
+同步低时延宽带空口 SLB 技术要求和测试方法》整理\\
+（团体标准 20250326 版）\\[0.5em]
+代码文件：\texttt{slb\_phy\_common.h} / \texttt{slb\_phy\_common.c}}
+\date{}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+%======================================================================
+\section{协议章节对应}
+%======================================================================
+
+本节对应星闪 SLB 接入层物理层协议 T/XS 10001-2025 第 6.5 节``共性基础算法''，具体涵盖：
+\begin{itemize}[nosep]
+  \item \textbf{6.5.1} 循环冗余校验（CRC）——五种多项式（CRC24A/CRC24B/CRC16/CRC8/CRC6）的编码与校验；
+  \item \textbf{6.5.2} 伪随机序列（31 阶 Gold 序列）——基于双 $m$ 序列的 Gold 序列生成；
+  \item \textbf{6.5.3} 伪随机 QPSK 序列——基于 Gold 序列的 161 子载波 QPSK 参考信号生成。
+\end{itemize}
+
+%======================================================================
+\section{功能定义}
+%======================================================================
+
+本模块为 SLB 120\,kHz 物理层中控制信息、参考信号、比特加扰等多条链路提供统一的``底层序列/校验''算法库。6.5.1\textasciitilde 6.5.3 不规定具体业务内容，只规定\textbf{怎么算}这些基础比特/符号序列。
+
+SAB、HARQ-ACK、CQI、GCI、数据 TB 等差错检测均依赖 CRC（6.5.1）；SRS、CSI-RS、DMRS、PAS、T 链路 ACK 序列传输等均依赖 Gold 序列（6.5.2）与 QPSK 序列（6.5.3）。
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lllll}
+\toprule
+\textbf{节号} & \textbf{名称} & \textbf{输入} & \textbf{输出} & \textbf{典型链路用途} \\
+\midrule
+6.5.1 & 循环冗余校验 CRC & $A$ 个信息比特 $+ g(D)$ & $B{=}A{+}L$ 个比特 & SAB、HARQ-ACK、CQI、GCI、数据 TB \\
+6.5.2 & 伪随机 Gold 序列 & $c_{\mathrm{init}}$, $M_{\mathrm{PN}}$ & $c(0)\ldots c(M_{\mathrm{PN}}{-}1)$ & 6.5.3、6.5.7 加扰、6.5.9.1 \\
+6.5.3 & 伪随机 QPSK 序列 & $n,l,N_{\mathrm{ID}},N_{\mathrm{CP}}$ & $r_{n,l}(0)\ldots r_{n,l}(160)$ & SRS、CSI-RS、DMRS、PAS、ACK \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{模块边界（上下游及职责划分）}
+%======================================================================
+
+\subsection{上游模块（输入来源）}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{4.2cm}p{4.5cm}p{5.5cm}}
+\toprule
+\textbf{上游模块} & \textbf{输入给本模块的内容} & \textbf{说明} \\
+\midrule
+控制信息组装（6.2.4） & $a_0\ldots a_{A-1}$ & 按 LSB$\rightarrow$MSB 组装，含预留位 \\
+数据 TB 处理（6.2.5） & 传输块信息比特 $+$ 分段参数 & $A$ 随 TB 大小变化 \\
+帧配置/调度模块 & CRC 类型、$c_{\mathrm{init}}$ 参数、$M_{\mathrm{PN}}$ & 决定多项式与 Gold 参数 \\
+高层 ID 配置 & Phy-ID 掩码（24 bit） & 仅 $L{=}24$ 的 CRC 掩码 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{下游模块（输出去向）}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{4.2cm}p{4.5cm}p{5.5cm}}
+\toprule
+\textbf{下游模块} & \textbf{本模块输出} & \textbf{说明} \\
+\midrule
+极化编码（6.2.6） & $b_0\ldots b_{B-1}$ & 控制信息链路 \\
+比特加扰（6.5.7） & Gold 序列 $c(i)$ & 与数据比特逐位模 2 加 \\
+资源映射（6.2.3） & QPSK 符号 $r_{n,l}(k)$ & 161 子载波，$k{=}80$ 置零 \\
+序列组跳（6.5.9.1） & Gold 序列 $c(i)$ & $c_{\mathrm{init}}=\lfloor n_{\mathrm{ID}}^X/30\rfloor$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{本模块不负责的内容}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{5.5cm}p{8.5cm}}
+\toprule
+\textbf{不负责内容} & \textbf{原因} \\
+\midrule
+具体业务语义 & 6.5.1\textasciitilde 6.5.3 只定义算法 \\
+信道编码（极化码/LDPC） & 由 6.2.6 负责 \\
+资源映射与时频分配 & 由 6.2.3 负责 \\
+纠错或重传决策 & CRC 仅检测，HARQ 由上层负责 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{在 SLB 通信流程中的角色}
+%======================================================================
+
+\begin{itemize}
+  \item \textbf{控制信息链路（6.2.4）}：6.5.1 CRC $\rightarrow$ 6.2.6 极化编码；
+  \item \textbf{参考信号链路（6.2.3）}：6.5.2 Gold $\rightarrow$ 6.5.3 QPSK $\rightarrow$ 资源网格；
+  \item \textbf{数据链路（6.2.5/6.5.7）}：6.5.1 TB 级 CRC $+$ 6.5.2 比特加扰。
+\end{itemize}
+
+\textbf{推荐复用策略}：工程上只维护一份 \texttt{slb\_phy\_common} 库；各链路模块仅传入不同的 $A$、$g(D)$、$c_{\mathrm{init}}$ 或 $N_{\mathrm{ID}}$ 等参数。
+
+%======================================================================
+\section{强制要求与关键参数}
+%======================================================================
+
+\subsection{6.5.1 循环冗余校验（CRC）}
+
+\textbf{强制规则：}
+\begin{itemize}[nosep]
+  \item GF(2) 整除：$T(D)$ 能被所选 $g(D)$ 整除；
+  \item 系统码：$b_k=a_k$（$k{=}0\ldots A{-}1$），$b_k=p_{k-A}$（$k{=}A\ldots A{+}L{-}1$）；
+  \item 带掩码（仅 $L{=}24$）：$b_k=(p_{k-A}+x_{\mathrm{MASK},k-A})\bmod 2$；
+  \item 比特顺序：下标 0 对应 LSB 字段先组装；预留位恒为 0 也参与计算。
+\end{itemize}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{枚举} & \textbf{生成多项式 $g(D)$} & \textbf{$L$} & \textbf{120\,kHz 典型用途} \\
+\midrule
+\texttt{SLB\_CRC24A} & $D^{24}{+}D^{23}{+}D^{18}{+}D^{17}{+}D^{14}{+}D^{11}{+}D^{10}{+}D^{7}{+}D^{6}{+}D^{5}{+}D^{4}{+}D^{3}{+}D{+}1$ & 24 & 第二类数据 TB \\
+\texttt{SLB\_CRC24B} & $D^{24}{+}D^{23}{+}D^{21}{+}D^{20}{+}D^{17}{+}D^{15}{+}D^{13}{+}D^{12}{+}D^{8}{+}D^{4}{+}D^{2}{+}D{+}1$ & 24 & SAB、HARQ-ACK、GCI \\
+\texttt{SLB\_CRC16} & $D^{16}{+}D^{12}{+}D^{5}{+}1$ & 16 & CQI、调度请求 SR \\
+\texttt{SLB\_CRC8} & $D^{8}{+}D^{6}{+}D^{5}{+}D^{3}{+}1$ & 8 & 第一类数据可选 \\
+\texttt{SLB\_CRC6} & $D^{6}{+}D^{5}{+}1$ & 6 & 特殊短控制信息 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{6.5.2 伪随机 Gold 序列}
+
+\begin{align}
+c(i) &= \bigl(x_1(i{+}1600) + x_2(i{+}1600)\bigr) \bmod 2 \\
+x_1(i{+}31) &= \bigl(x_1(i{+}3) + x_1(i)\bigr) \bmod 2 \\
+x_2(i{+}31) &= \bigl(x_2(i{+}3) + x_2(i{+}2) + x_2(i{+}1) + x_2(i)\bigr) \bmod 2
+\end{align}
+
+初始化：$x_1(0){=}1$，$x_1(i){=}0$（$i{=}1\ldots 30$）；$c_{\mathrm{init}}=\sum_{i=0}^{30} x_2(i)\cdot 2^i$。
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{场景} & \textbf{标准节} & \textbf{$c_{\mathrm{init}}$ 公式} \\
+\midrule
+伪随机 QPSK 参考信号 & 6.5.3 & $2^{10}(15(n{+}1){+}l{+}1)(4N_{\mathrm{ID}}{+}1){+}4N_{\mathrm{ID}}{+}N_{\mathrm{CP}}$ \\
+比特加扰 & 6.5.7 & $n_f\cdot 2^{24} + N_{\mathrm{G-PID}}$ \\
+ZC 序列组跳 & 6.5.9.1 & $\lfloor n_{\mathrm{ID}}^X / 30\rfloor$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{6.5.3 伪随机 QPSK 序列}
+
+\begin{equation}
+r_{n,l}(m) = \frac{1}{\sqrt{2}}\bigl(2c(2m)-1\bigr) + j\,\frac{1}{\sqrt{2}}\bigl(2c(2m{+}1)-1\bigr), \quad m=0,\ldots,160
+\end{equation}
+
+所需 Gold 长度 $M_{\mathrm{PN}}=322$；DC 子载波 $k{=}80$ 置零。
+
+\textbf{标准算例}（$n{=}0,l{=}0,N_{\mathrm{ID}}{=}5,N_{\mathrm{CP}}{=}3$）：
+$c_{\mathrm{init}}=344087$，$c(0\ldots 4)=0,1,1,1,0$。
+
+%======================================================================
+\section{数据类型、长度/维度}
+%======================================================================
+
+\subsection{6.5.1 CRC 编码接口 \texttt{slb\_crc\_encode}}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lllll}
+\toprule
+\textbf{变量} & \textbf{方向} & \textbf{类型} & \textbf{长度} & \textbf{说明} \\
+\midrule
+\texttt{a} & 输入 & \texttt{const uint8\_t *} & $A$ bit & 信息比特，每元素 0/1 \\
+\texttt{A} & 输入 & \texttt{uint32\_t} & 1 & 信息比特个数 \\
+\texttt{poly} & 输入 & \texttt{slb\_crc\_poly\_t} & 1 & CRC 多项式选择 \\
+\texttt{mask} & 输入 & \texttt{const uint8\_t *} 或 \texttt{NULL} & 24 bit & 掩码；\texttt{NULL} 表示不加 \\
+\texttt{b} & 输出 & \texttt{uint8\_t *} & $A{+}L$ bit & 编码比特 $b_0\ldots b_{B-1}$ \\
+\texttt{b\_cap} & 输入 & \texttt{uint32\_t} & 1 & 缓冲区容量 $\geq A{+}L$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{6.5.2 Gold 序列接口 \texttt{slb\_pn\_gold\_generate}}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{变量} & \textbf{方向} & \textbf{类型} & \textbf{含义} \\
+\midrule
+\texttt{c\_init} & 输入 & \texttt{uint32\_t} & Gold 初始化整数 \\
+\texttt{M\_PN} & 输入 & \texttt{uint32\_t} & 所需序列长度 \\
+\texttt{c} & 输出 & \texttt{uint8\_t *} & $c(0)\ldots c(M_{\mathrm{PN}}{-}1)$ \\
+\texttt{c\_cap} & 输入 & \texttt{uint32\_t} & 容量 $\geq M_{\mathrm{PN}}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{6.5.3 QPSK 接口}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{变量} & \textbf{方向} & \textbf{类型} & \textbf{含义} \\
+\midrule
+\texttt{param.n/l/N\_ID/N\_CP} & 输入 & \texttt{uint8\_t} & 时频/小区/CP 参数 \\
+\texttt{r} & 输出 & \texttt{slb\_cpx\_f32\_t *} & 161 个 QPSK 符号 \\
+\texttt{r\_cap} & 输入 & \texttt{uint32\_t} & $\geq 161$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{时序关系}
+%======================================================================
+
+\begin{itemize}[nosep]
+  \item \textbf{工作模式}：函数调用模式，无持续流式状态；
+  \item \textbf{无状态约束}：无静态全局变量，可重入、可多线程；
+  \item \textbf{实时性}：Gold 需迭代 $M_{\mathrm{PN}}{+}1600$ 次 LFSR，建议帧起始前预计算；CRC 为 $O(A)$。
+\end{itemize}
+
+%======================================================================
+\section{接口表格（明确的输入/输出）}
+%======================================================================
+
+\subsection{\texttt{slb\_crc\_encode}}
+
+\begin{longtable}{p{2.2cm}p{2.8cm}p{1.2cm}p{1.5cm}p{2.2cm}p{4.5cm}}
+\toprule
+\textbf{参数} & \textbf{类型} & \textbf{长度} & \textbf{必需} & \textbf{来源} & \textbf{说明} \\
+\midrule
+\endhead
+\texttt{a} & \texttt{const uint8\_t *} & $A$ & 是 & 信息组装 & 信息比特 0/1 \\
+\texttt{A} & \texttt{uint32\_t} & 1 & 是 & 上游 & 信息比特数 \\
+\texttt{poly} & \texttt{slb\_crc\_poly\_t} & 1 & 是 & 协议配置 & CRC 类型 \\
+\texttt{mask} & \texttt{const uint8\_t *} & 24 & 条件 & 高层 ID & 24 bit 掩码 \\
+\texttt{b} & \texttt{uint8\_t *} & $A{+}L$ & 是 & 调用方 & 输出缓冲 \\
+\texttt{b\_cap} & \texttt{uint32\_t} & 1 & 是 & 调用方 & $\geq A{+}L$ \\
+\bottomrule
+\end{longtable}
+
+\subsection{\texttt{slb\_crc\_check}}
+
+输入：\texttt{b}（$B$ bit）、\texttt{poly}、\texttt{mask}；输出：\texttt{pass}（1=通过，0=失败）。
+
+\subsection{\texttt{slb\_pn\_gold\_generate}}
+
+输入：\texttt{c\_init}、\texttt{M\_PN}、\texttt{c\_cap}；输出：\texttt{c[0..M\_PN-1]}。
+
+\subsection{\texttt{slb\_qpsk\_calc\_cinit} / \texttt{slb\_qpsk\_ref\_generate} / \texttt{slb\_qpsk\_map\_to\_re}}
+
+分别计算 $c_{\mathrm{init}}$、生成 161 点 QPSK 序列、映射单个子载波 RE（$k{=}80$ 时输出 $(0,0)$）。
+
+%======================================================================
+\section{处理步骤}
+%======================================================================
+
+\subsection{6.5.1 CRC 编码（以 CRC24B 为例）}
+
+\begin{enumerate}
+  \item 参数校验：空指针、\texttt{b\_cap} $< A{+}L$ 返回错误；
+  \item 初始化 CRC 寄存器为 0；
+  \item 逐 bit 移入 $a_0\ldots a_{A-1}$，按 $g(D)$ 抽头模 2 反馈；
+  \item 提取 $L$ 位校验比特 $p_0\ldots p_{L-1}$；
+  \item 若 \texttt{mask}$\neq$\texttt{NULL}：$b_{A+i}=(p_i+\mathrm{mask}_i)\bmod 2$；否则 $b_{A+i}=p_i$。
+\end{enumerate}
+
+\subsection{6.5.2 Gold 序列生成}
+
+\begin{enumerate}
+  \item 初始化 $x_1$：$x_1(0){=}1$，其余为 0；
+  \item 由 $c_{\mathrm{init}}$ 初始化 $x_2(0\ldots 30)$；
+  \item LFSR 递推至 $i=M_{\mathrm{PN}}{+}1600{-}1$；
+  \item $c(i)=(x_1(i{+}1600)+x_2(i{+}1600))\bmod 2$。
+\end{enumerate}
+
+\subsection{6.5.3 QPSK 参考信号生成}
+
+\begin{enumerate}
+  \item 计算 $c_{\mathrm{init}}$；
+  \item 调用 \texttt{slb\_pn\_gold\_generate}（$M_{\mathrm{PN}}{=}322$）；
+  \item 对 $m{=}0\ldots 160$ 做 QPSK 映射；
+  \item 资源映射：$k{\neq}80$ 时 $a_{k,l}=r_{n,l}(k)$，$k{=}80$ 置零。
+\end{enumerate}
+
+%======================================================================
+\section{状态机与时序}
+%======================================================================
+
+本模块为纯函数库，无内部状态机。建议时序：
+\begin{itemize}[nosep]
+  \item CRC：信息比特组装后、信道编码前；
+  \item Gold：帧配置确定后预计算；
+  \item QPSK：每符号 $l$ 单独生成。
+\end{itemize}
+
+%======================================================================
+\section{协议中允许本模块改变的参数}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{参数} & \textbf{来源} & \textbf{影响} \\
+\midrule
+\texttt{poly} & 帧类型/信令 & 决定 $L$ 与 $g(D)$ \\
+\texttt{A} & 上游输入 & 改变 $B{=}A{+}L$ \\
+\texttt{mask} & 高层 ID & 仅 $L{=}24$，改变校验位 \\
+\texttt{c\_init}, \texttt{M\_PN} & 调度/ID 配置 & 改变 Gold/QPSK 序列 \\
+\texttt{n,l,N\_ID,N\_CP} & 帧/CP 配置 & 改变 QPSK $c_{\mathrm{init}}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{约束与极限条件}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{4.5cm}p{9.5cm}}
+\toprule
+\textbf{约束} & \textbf{处理建议} \\
+\midrule
+CRC 多项式必须合法 & 非法 \texttt{poly} 返回 \texttt{SLB\_PHY\_ERR\_PARAM} \\
+\texttt{b\_cap} $\geq A{+}L$ & 不足返回 \texttt{SLB\_PHY\_ERR\_BUF} \\
+Gold 1600 偏移必须执行 & 不可从 $i{=}0$ 简化为无偏移 \\
+QPSK DC（$k{=}80$）置零 & 由 \texttt{slb\_qpsk\_map\_to\_re} 处理 \\
+线程安全 & 无全局可变状态，输出缓冲由调用方提供 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{链路调用对照表}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llccc}
+\toprule
+\textbf{链路/信息块} & \textbf{标准位置} & \textbf{6.5.1} & \textbf{6.5.2} & \textbf{6.5.3} \\
+\midrule
+通信域 SAB & 6.2.4.1.1 & CRC24B & --- & --- \\
+HARQ-ACK / GCI & 6.2.4.10 & CRC24B+掩码 & --- & --- \\
+CQI / SR & 6.2.4.10.3/4 & CRC16 & --- & --- \\
+第二类数据 TB & 6.2.5.3 & CRC24A & --- & --- \\
+第一类数据 & 6.2.5.2.2 & CRC24A/16/8 & 6.5.7 & --- \\
+SRS / CSI-RS / DMRS & 6.2.3 & --- & $c(i)$ & $r_{n,l}(k)$ \\
+极化码块分段 CRC & 6.2.6.1.1 & CRC24B & --- & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{API 速查}
+%======================================================================
+
+\begin{lstlisting}[language=C]
+/* 6.5.1 */
+uint32_t slb_crc_get_len(slb_crc_poly_t poly);
+int slb_crc_encode(const slb_crc_encode_t *cfg);
+int slb_crc_check(const slb_crc_check_t *cfg);
+
+/* 6.5.2 */
+int slb_pn_gold_generate(const slb_pn_seq_t *cfg);
+
+/* 6.5.3 */
+uint32_t slb_qpsk_calc_cinit(const slb_qpsk_cinit_param_t *param);
+int slb_qpsk_ref_generate(const slb_qpsk_seq_t *cfg);
+int slb_qpsk_map_to_re(const slb_cpx_f32_t *r, slb_cpx_f32_t *a_kl, uint32_t k);
+\end{lstlisting}
+
+%======================================================================
+\section{错误码}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\begin{tabular}{cll}
+\toprule
+\textbf{宏} & \textbf{值} & \textbf{含义} \\
+\midrule
+\texttt{SLB\_PHY\_OK} & 0 & 成功 \\
+\texttt{SLB\_PHY\_ERR\_PARAM} & $-1$ & 空指针或非法参数 \\
+\texttt{SLB\_PHY\_ERR\_BUF} & $-2$ & 输出缓冲区容量不足 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{工程集成说明}
+%======================================================================
+
+\subsection{文件结构}
+
+\begin{lstlisting}
+20260623-6.5.1-6.5.3-CRC与伪随机序列/
+  slb_phy_common.h
+  slb_phy_common.c
+  slb_phy_common_test.c
+  SLB物理层6.5.1-6.5.3共性基础算法技术文档.tex
+\end{lstlisting}
+
+\subsection{编译}
+
+\begin{lstlisting}[language=bash]
+cc -std=c99 -Wall -Wextra -c slb_phy_common.c -o slb_phy_common.o
+cc your_phy_module.c slb_phy_common.o -o your_phy_app
+cc -std=c99 slb_phy_common.c slb_phy_common_test.c -o slb_phy_common_test
+./slb_phy_common_test
+\end{lstlisting}
+
+\vfill
+\begin{center}
+\small\textcolor{gray}{精确参数与字段定义以 T/XS 10001-2025 正式标准为准；本文档仅供 SLB 物理层实现与联调参考。}
+\end{center}
+
+\end{document}
