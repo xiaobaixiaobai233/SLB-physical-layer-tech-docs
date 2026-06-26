@@ -1,1 +1,2 @@
 # SLB-physical-layer-tech-docs
+Adopting AI-assisted programming techniques to rapidly comprehend the overall architecture of the NearLink (SLB) communication system, and participate in the C-language implementation of physical-layer modules. This project focuses on building a complete engineering closed loop rather than simply writing code in C or reusing existing open-source resources. The full workflow covers protocol comprehension, interface design, AI-aided coding, functional implementation, code validation, hardware testing, and result verification.
