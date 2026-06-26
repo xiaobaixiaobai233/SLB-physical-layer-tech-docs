@@ -1,0 +1,417 @@
+% !TEX program = xelatex
+\documentclass[11pt,a4paper]{ctexart}
+
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{xcolor}
+
+\geometry{left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm}
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue}
+
+\newcommand{\learn}[1]{\par\noindent\textcolor{blue!70!black}{\textbf{学习要点：}#1}\par}
+
+\title{%
+  \textbf{星闪无线通信系统}\\[0.5em]
+  \Large 120\,kHz 基础子载波间隔系统\\[0.3em]
+  6.2.7\textasciitilde 6.2.10\\[0.2em]
+  \normalsize 3D-FISA 流程 \textbullet\ 多域同步 \textbullet\ 基带信号 \textbullet\ 调制上变频\\[0.5em]
+  \large —— 学习资料 ——
+}
+\author{依据 T/XS 10001-2025《星闪无线通信系统 接入层\\
+同步低时延宽带空口 SLB 技术要求和测试方法》整理\\
+（团体标准 20250326 版）}
+\date{}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+%======================================================================
+\section{引言：从比特到射频的“最后一公里”}
+%======================================================================
+
+读者已掌握 6.2.1\textasciitilde 6.2.6 的内容：帧结构、物理层信号、控制/数据信息的发送流程，以及极化码信道编码。6.2.7\textasciitilde 6.2.10 则回答物理层在\textbf{系统运行层面}和\textbf{波形生成层面}的最后几个关键问题：
+
+\begin{enumerate}
+  \item \textbf{6.2.7}：G/T 节点如何在时域、频域上竞争与占用信道（3D-FISA 流程）？
+  \item \textbf{6.2.8}：多个通信域并存时，如何实现域间时间与频率同步？
+  \item \textbf{6.2.9}：资源网格上的复数符号 $a_{k,l}^{(p)}$ 如何合成为时域基带连续信号？
+  \item \textbf{6.2.10}：基带信号如何经 IQ 调制与上变频变为射频发射信号？
+\end{enumerate}
+
+\begin{table}[h]
+\centering
+\caption{本节四块内容与前后章节的衔接}
+\begin{tabular}{lll}
+\toprule
+\textbf{标准节} & \textbf{核心问题} & \textbf{前置知识} \\
+\midrule
+6.2.7 & 信道占用与 SAB 周期发送 & 6.2.2 无线帧/COT；6.2.4 SAB \\
+6.2.8 & 多域 SyncID 与同步源选择 & 6.2.3 FTS/STS；6.2.4 SAB \\
+6.2.9 & OFDM 时域波形合成 & 6.2.2 RE/符号；6.2.5 资源映射 \\
+6.2.10 & IQ 上变频与载波相位对齐 & 6.2.9 基带信号 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\learn{6.2.7\textasciitilde 8 偏“协议行为/系统流程”，6.2.9\textasciitilde 10 偏“信号处理公式”。二者共同构成 120\,kHz 物理层从调度到空口波形的完整闭环。}
+
+\newpage
+%======================================================================
+\section{6.2.7 3D-FISA 流程}
+%======================================================================
+
+\subsection{本节在说什么？}
+
+\textbf{3D-FISA} 描述通信域中 G 节点与 T 节点围绕\textbf{信道占用}与\textbf{同步信息获取}的运行流程。名称中的“3D”可理解为在三个维度上组织接入行为：
+
+\begin{itemize}
+  \item \textbf{时域（Time）}：以\textbf{1 个无线帧}为粒度竞争信道；空闲时以无线帧为粒度不发送任何信号；
+  \item \textbf{频域（Frequency）}：以\textbf{基础载波}为粒度竞争；成功后可在多个基础载波上同时占用；
+  \item \textbf{同步周期（Sync period）}：占用期间以\textbf{同步信息块（SAB）发送周期}为粒度，在竞争到的各基础载波上持续发送同步与广播信息。
+\end{itemize}
+
+FISA 强调“先竞争、后占用、再释放”的帧级频域接入思想，与 6.2.2 节所述“通信域以竞争抢占方式时分使用各基础载波”一致。
+
+\subsection{G 节点行为}
+
+\subsubsection{有数据传输需求时}
+
+当 G 节点存在业务数据或高层信令的发送需求时：
+
+\begin{enumerate}
+  \item \textbf{竞争信道}：在时域以 1 个无线帧为粒度、在频域以 1 个基础载波为粒度发起竞争；
+  \item \textbf{竞争成功后占用}：以 SAB 发送周期为粒度，占用已竞争到的\textbf{每一个}基础载波；
+  \item \textbf{发送同步与广播}：在占用期间，于一个或多个基础载波上发送 SAB 和广播信息（详见下节）；
+  \item \textbf{释放信道}：占用结束后释放所有基础载波，结束本次 COT（Channel Occupancy Time，见 6.2.2）。
+\end{enumerate}
+
+\subsubsection{无数据传输需求时}
+
+G 节点以\textbf{无线帧}为粒度进入空闲状态，\textbf{不发送任何信号}。这保证了无业务时不无谓占用频谱。
+
+\subsubsection{SAB 与广播信息的发送规则}
+
+G 节点竞争成功后，在竞争到的一个或多个基础载波上发送 SAB 和广播信息。其中\textbf{至少 1 个}基础载波承担 SAB/广播的周期发送：
+
+\begin{itemize}
+  \item 起始时刻：从\textbf{竞争成功后的第一个无线帧}开始；
+  \item 发送周期：分别按 SAB、广播信息\textbf{各自配置的周期}周期发送；
+  \item 结束条件：在 G 节点\textbf{释放信道之前}持续周期发送。
+\end{itemize}
+
+若 G 节点占用了多个基础载波，可在多个载波上同时发送业务，但 SAB/广播的周期发送规则仍以上述“从首帧起、按各自周期、至释放前止”为准。
+
+\learn{G 节点的状态机可简记为：\textbf{空闲（无发送）}$\rightarrow$\textbf{竞争}$\rightarrow$\textbf{占用（SAB/广播/业务）}$\rightarrow$\textbf{释放}$\rightarrow$空闲。竞争粒度是“帧$\times$载波”，占用粒度是“SAB 周期$\times$载波”。}
+
+\subsection{T 节点行为}
+
+T 节点不主动竞争信道，而是通过\textbf{盲检测（blind detection）} G 节点发出的同步信息，确定所连接 G 节点的资源占用，再在其调度下通信。
+
+\subsubsection{盲检成功后的行为}
+
+若在\textbf{至少一个}基础载波上盲检到所连接 G 节点的同步信息成功：
+
+\begin{enumerate}
+  \item 在该成功的基础载波上，在\textbf{1 个 SAB 发送周期}内按 G 节点调度传输数据；
+  \item 在\textbf{下一个 SAB 发送周期}再次盲检 G 节点的同步信息，以确认 G 节点仍占用该资源。
+\end{enumerate}
+
+\subsubsection{盲检失败后的行为}
+
+若未盲检到所连接 G 节点的同步信息，则在\textbf{下一个无线帧}再次尝试盲检。
+
+\learn{T 节点的同步跟踪是“\textbf{成功则跟 1 个 SAB 周期、下个 SAB 周期再检；失败则下帧再检}”。这保证 T 节点始终跟随 G 节点当前的 COT 与载波占用状态。}
+
+\subsection{与 COT、SAB 的关系（回顾）}
+
+结合 6.2.2 与 6.2.4 已学内容，可将 3D-FISA 放入更大图景：
+
+\begin{itemize}
+  \item \textbf{COT}：从竞争成功后首帧起，到所有基础载波释放前的末帧（含）止；
+  \item \textbf{SAB}：含 FTS/STS 等同步信号及物理层控制信息，是 T 节点盲检的对象；
+  \item \textbf{多载波}：G 可在多个基础载波上并行占用；T 只需在任一成功盲检的载波上即可开始跟调度。
+\end{itemize}
+
+\newpage
+%======================================================================
+\section{6.2.8 多域同步流程}
+%======================================================================
+
+\subsection{为什么需要多域同步？}
+
+在实际部署中，同一频段内可能存在\textbf{多个通信域}（各自独立的 G 节点及其 T 节点群）。若各域时钟/载频不一致，邻域信号会造成干扰，T 节点也无法稳定跟踪。
+
+\textbf{多域同步}的目标：使各通信域的 G 节点在\textbf{时间}和\textbf{频率}上保持一致（至少达到\textbf{符号级同步}），并选举统一的\textbf{同步源}作为参考。
+
+\subsection{同步源的定义与选择原则}
+
+\textbf{同步源}：提供参考时间和频率的被同步 G 节点。
+
+选择规则（待同步通信域的 G 节点）：
+\begin{enumerate}
+  \item 扫描同一频段内邻域 G 节点的 SAB；
+  \item 仅考虑接收信号强度超过门限 $Th_{\mathrm{sync}}$ 的邻域；
+  \item 在候选者中，比较 SAB 内\textbf{同步标识字段 SyncID} 的数值；
+  \item \textbf{SyncID 取值最大}的 G 节点所在同步域即为同步源。
+\end{enumerate}
+
+\learn{同步源 = “\textbf{信号够强} + \textbf{SyncID 最大}”。SyncID 不仅是随机数，其高 8 位还编码了设备能力与优先级（见表~\ref{tab:sync-cap}）。}
+
+\subsection{同步源选择/更新：三步流程}
+
+标准以图~3 给出同步源选择/更新的三个步骤：
+
+\subsubsection{步骤一：本域 G 节点 SyncID 确定}
+
+触发时机：每次\textbf{开机}时，或\textbf{多域同步能力属性}发生变化时（见表~\ref{tab:sync-cap}）。
+
+SyncID 共 \textbf{32 比特}：
+\begin{itemize}
+  \item \textbf{高 8 位}：由多域同步能力属性决定（发射功率、版本、供电、定时来源、设备优先级等）；
+  \item \textbf{低 24 位}：由 G 节点\textbf{随机产生}。
+\end{itemize}
+
+SyncID 承载在 SAB 中，供邻域节点比较。
+
+\begin{table}[h]
+\centering
+\caption{多域同步能力属性（决定 SyncID 高 8 位）}
+\label{tab:sync-cap}
+\begin{tabular}{clp{7.5cm}}
+\toprule
+\textbf{比特位} & \textbf{信息} & \textbf{描述} \\
+\midrule
+0 & 发射功率 & 1：额定功率 $P\ge 20$\,dBm；0：$P<20$\,dBm \\
+1--2 & 多域同步版本 & 取值越大版本越新；当前版本对应 \texttt{01} \\
+3 & 供电类型 & 1：非电池供电；0：电池供电 \\
+4--5 & 定时来源 & \texttt{11}：GNSS/GPS 等外部授时；\texttt{10}：蜂窝网等外部授时；\texttt{01}：无其他外部授时；\texttt{00}：其他 \\
+6 & 设备优先级 & 1：高级域；0：低级域 \\
+7 & 保留 & — \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+注：比特位~0 对应最高有效位（MSB）。
+
+\learn{SyncID 比较实质上是“\textbf{能力属性优先、随机数次之}”的层级排序：高 8 位先比（功率/版本/授时/优先级），相同时再比低 24 位随机数。}
+
+\subsubsection{步骤二：邻域 SAB 的同步与解析}
+
+触发时机：每次\textbf{开机}时，或\textbf{周期性}执行。
+
+本域 G 节点扫描同频段其他 G 节点的 SAB，捕获同步信号（FTS 等），对邻域 FTS 信号强度超过 $Th_{\mathrm{sync}}$ 的 G 节点：
+\begin{itemize}
+  \item 完成时间/频率同步；
+  \item 解析 SAB，读取其 SyncID。
+\end{itemize}
+
+\subsubsection{步骤三：确定同步源}
+
+比较本域 G 节点与各邻域 G 节点的 SyncID，\textbf{数值最大}者为同步源。
+
+确定后进入\textbf{本域同步调整}：
+\begin{itemize}
+  \item 若同步源是\textbf{本域 G 节点}：无需额外动作（本域即为参考）；
+  \item 若同步源是\textbf{邻域 G 节点}：本域 G 节点向同步源执行时间和频率同步。
+\end{itemize}
+
+\subsection{本域同步调整：T 节点如何跟随？}
+
+当本域 G 节点需要与邻域同步源对齐时，须同时考虑本域 T 节点的跟踪能力。标准给出两种方式：
+
+\subsubsection{方式 1：G 节点逐步微调}
+
+G 节点以小步长调整定时与频偏，调整幅度\textbf{不超过 T 节点的定时跟踪能力}：
+\begin{itemize}
+  \item 典型定时调整：每次 $\le 4T_s$（$T_s$ 为基本时间单位，120\,kHz 下 $T_s=1/30720000$\,s）；
+  \item 典型频偏调整：每次 $\le 0.1$\,ppm。
+\end{itemize}
+
+适用于偏差较小、需平滑过渡的场景。
+
+\subsubsection{方式 2：G/T 约定统一时刻跳变}
+
+当本域 G 节点与同步源的偏差较大时，G 节点与 T 节点约定在\textbf{统一时刻}一次性改变定时/频偏：
+\begin{itemize}
+  \item 通过 XRC reconfiguration 消息下发同步偏差与频率偏差调整；
+  \item 或通过 SIB 携带同步偏差与频率偏差调整信息。
+\end{itemize}
+
+适用于偏差较大、逐步微调来不及收敛的场景。
+
+\subsection{域间同步跟踪}
+
+除初始选择与调整外，本域 G 节点还需\textbf{持续跟踪}同步源，防止时钟漂移累积。跟踪检测时刻：
+
+\begin{itemize}
+  \item \textbf{时刻 1}：本域 G 节点\textbf{空闲状态}期间，以 \textbf{250\,$\mu$s} 为周期检测同步源；
+  \item \textbf{时刻 2}：本域 G 节点每次\textbf{占用信道结束后}，连续 \textbf{4 个 250\,$\mu$s} 时段检测同步源。
+\end{itemize}
+
+检测成功则调整本域时频同步，保持与同步源一致。
+
+\learn{多域同步 = \textbf{选源（SyncID）} + \textbf{调整（两种方式）} + \textbf{跟踪（250\,$\mu$s 周期）}。实现时 FTS 捕获与 SyncID 解析是步骤二的核心。}
+
+\newpage
+%======================================================================
+\section{6.2.9 基带信号生成}
+%======================================================================
+
+\subsection{从资源网格到时域波形}
+
+6.2.5 节完成了比特$\rightarrow$调制符号$\rightarrow$资源映射，在资源网格 $(k,l)$ 上得到复数 $a_{k,l}^{(p)}$（天线端口 $p$）。6.2.9 节给出将这些频域符号合成为\textbf{时域连续基带信号}的公式——本质是\textbf{CP-OFDM 的 IFFT 合成}（见 6.2.2 CP-OFDM 波形原理）。
+
+\subsection{符号级时域信号定义}
+
+对一个\textbf{基础载波}、一个无线帧中的第 $l$ 号符号，在天线端口 $p$ 上，时域连续信号 $s_l^{(p)}(t)$ 定义为：
+\begin{equation}
+s_l^{(p)}(t)=\sum_{k=0}^{160}a_{k,l}^{(p)}\cdot
+e^{j2\pi(k-80)\Delta f\left(t-T_{\mathrm{CP}}-t_{\mathrm{start},l}\right)}
+\end{equation}
+
+其中：
+\begin{itemize}
+  \item $t_{\mathrm{start},l}\le t < t_{\mathrm{start},l}+T_{\mathrm{Symb}}$：该符号的有效时间区间；
+  \item 该无线帧起始时刻对应 $t=0$；
+  \item $t_{\mathrm{start},l}$：本无线帧中第 $l$ 号符号的起始时刻；
+  \item $T_{\mathrm{Symb}}$：该符号的时间长度（含 CP，见 6.2.2 各符号类型）；
+  \item $T_{\mathrm{CP}}$：循环前缀长度；
+  \item $\Delta f=120$\,kHz：子载波间隔；
+  \item $k=0,\ldots,160$：子载波索引，$k=80$ 为 DC 子载波（通常不发送或置零）；
+  \item $a_{k,l}^{(p)}$：端口 $p$、子载波 $k$、符号 $l$ 上的复数调制值（含物理层信号、控制/数据映射及功率缩放）。
+\end{itemize}
+
+\subsection{公式逐项理解}
+
+\subsubsection{求和项：子载波叠加}
+
+$\sum_{k=0}^{160}$ 表示对基础载波上 161 个子载波的频域符号做\textbf{逆傅里叶合成}。每个 $a_{k,l}^{(p)}$ 加权一个复指数载波 $e^{j2\pi(k-80)\Delta f\cdot(\cdot)}$。
+
+\subsubsection{频率索引 $(k-80)$}
+
+子载波编号 $k=0\sim 160$，中心 DC 在 $k=80$。使用 $(k-80)$ 使 DC 对应零频偏移，两侧子载波对称分布于 $\pm 80\Delta f$ 范围内——这与 6.2.2 所述“161 子载波、DC 居中”一致。
+
+\subsubsection{时间偏移 $(t-T_{\mathrm{CP}}-t_{\mathrm{start},l})$}
+
+指数项中的时间变量减去 CP 长度 $T_{\mathrm{CP}}$ 和符号起始 $t_{\mathrm{start},l}$，对应 OFDM 实现中“在有效符号区间做 IFFT、再前置 CP”的时域结构。$T_{\mathrm{CP}}$ 用于对抗多径时延扩展（见 6.2.2 五种符号类型的 CP 长度）。
+
+\learn{实现路径：资源网格填 $a_{k,l}^{(p)}\rightarrow$ 161 点 IFFT（或 256 点含零填充）$\rightarrow$ 加 CP $\rightarrow$ 拼接各符号得帧级基带。公式是原理描述，工程上用 FFT/IFFT 模块完成。}
+
+\subsection{与资源映射的衔接}
+
+不同物理信道（SAB、G-PCIB、数据 PIB 等）在 6.2.4/6.2.5 中规定了 $(k,l)$ 映射规则；6.2.3 物理层信号（FTS、STS、DMRS 等）也在特定 RE 上填入 $a_{k,l}^{(p)}$。6.2.9 不区分业务类型——\textbf{所有已映射的 RE 统一参与上述求和}，未映射 RE 对应 $a_{k,l}^{(p)}=0$。
+
+\newpage
+%======================================================================
+\section{6.2.10 调制和上变频}
+%======================================================================
+
+\subsection{从基带到射频}
+
+6.2.9 得到的是\textbf{复基带}时域信号 $s_l^{(p)}(t)$（或整帧拼接后的 $s^{(p)}(t)$）。6.2.10 描述如何将其调制到\textbf{基础载波中心频率 $f_0$} 上，经天线端口 $p$ 发射。标准以图~4 给出处理框图。
+
+\subsection{处理流程（图 4）}
+
+对基础信道中心频率为 $f_0$ 的基础载波，处理步骤为：
+
+\begin{enumerate}
+  \item \textbf{Split（分路）}：将复基带 $s_l^{(p)}(t)$ 分为实部与虚部：
+        \begin{align}
+        I(t)&=\Re\{s_l^{(p)}(t)\} \\
+        Q(t)&=\Im\{s_l^{(p)}(t)\}
+        \end{align}
+  \item \textbf{混频（上变频）}：
+        \begin{align}
+        I_{\mathrm{RF}}(t)&=I(t)\cdot\cos(2\pi f_0 t) \\
+        Q_{\mathrm{RF}}(t)&=Q(t)\cdot\bigl(-\sin(2\pi f_0 t)\bigr)
+        \end{align}
+        标准将 $\cos(2\pi f_0 t)$ 与 $-\sin(2\pi f_0 t)$ 称为该基础载波的\textbf{混频时钟}。
+  \item \textbf{合成}：$s_{\mathrm{RF}}^{(p)}(t)=I_{\mathrm{RF}}(t)+Q_{\mathrm{RF}}(t)$，即标准框图中的求和节点；
+  \item \textbf{Filtering（滤波）}：对合成射频信号做带通/低通滤波，抑制镜像与带外辐射。
+\end{enumerate}
+
+合并写法即为经典 IQ 正调制：
+\begin{equation}
+s_{\mathrm{RF}}^{(p)}(t)=\Re\{s_l^{(p)}(t)\}\cos(2\pi f_0 t)
+-\Im\{s_l^{(p)}(t)\}\sin(2\pi f_0 t)
+=\Re\{s_l^{(p)}(t)\,e^{j2\pi f_0 t}\}
+\end{equation}
+
+\learn{这是标准的\textbf{复包络上变频}：基带 $s(t)$ 乘以 $e^{j2\pi f_0 t}$ 的实部实现。接收端用同相/正交混频做下变频还原基带。}
+
+\subsection{多基础载波的混频时钟相位对齐}
+
+标准规定：\textbf{在每个无线帧的起始时刻，不同基础载波的混频时钟相位相同}。
+
+含义：
+\begin{itemize}
+  \item 各基础载波虽中心频率 $f_0$ 不同，但帧边界处 $\cos(2\pi f_0 t)$ 与 $\sin(2\pi f_0 t)$ 的\textbf{初相一致}；
+  \item 保证多载波聚合（如 40/80/160\,MHz）时，各载波上的 OFDM 符号在时域对齐，T 节点可一致解调；
+  \item 实现上需在射频/中频单元对各载波 LO 做\textbf{相位校准}，使帧起点对齐。
+\end{itemize}
+
+\subsection{与 6.2.9 的完整发射链}
+
+将 6.2.9 与 6.2.10 串联，120\,kHz 单基础载波发射链为：
+
+\begin{center}
+比特 $\rightarrow$ 编码/调制/映射（6.2.5/6.2.6）$\rightarrow$ 资源网格 $a_{k,l}^{(p)}$
+$\rightarrow$ IFFT+CP（6.2.9）$\rightarrow$ 基带 $s_l^{(p)}(t)$
+$\rightarrow$ IQ 上变频（6.2.10）$\rightarrow$ RF 发射（天线端口 $p$）
+\end{center}
+
+\newpage
+%======================================================================
+\section{全链路回顾与关键概念速查}
+%======================================================================
+
+\subsection{核心术语}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{术语/符号} & \textbf{含义} \\
+\midrule
+3D-FISA & 帧级$\times$载波级竞争占用 + SAB 周期发送的接入流程 \\
+COT & 从竞争成功首帧到释放末帧的信道占用时间 \\
+SAB & 同步信息块，含 FTS/STS 及控制信息，T 节点盲检对象 \\
+SyncID & 32 比特同步标识（高 8 位能力属性 + 低 24 位随机） \\
+$Th_{\mathrm{sync}}$ & 邻域 FTS 信号强度门限，超过才参与同步源比较 \\
+同步源 & SyncID 最大的、信号够强的参考 G 节点 \\
+$a_{k,l}^{(p)}$ & 端口 $p$、子载波 $k$、符号 $l$ 的频域复数 \\
+$s_l^{(p)}(t)$ & 符号 $l$ 的时域基带连续信号 \\
+$f_0$ & 基础载波中心频率 \\
+混频时钟 & $\cos(2\pi f_0 t)$ 与 $-\sin(2\pi f_0 t)$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{四节内容一句话总结}
+
+\begin{enumerate}
+  \item \textbf{6.2.7}：G 节点帧/载波竞争占用，T 节点盲检 SAB 跟调度；
+  \item \textbf{6.2.8}：多域通过 SyncID 选同步源，G 微调或跳变对齐，250\,$\mu$s 周期跟踪；
+  \item \textbf{6.2.9}：161 子载波 IFFT 合成符号级基带 $s_l^{(p)}(t)$；
+  \item \textbf{6.2.10}：IQ 混频上变频至 $f_0$，帧起点各载波 LO 同相。
+\end{enumerate}
+
+\subsection{与前后章节的衔接}
+
+\begin{itemize}
+  \item \textbf{6.2.2}：无线帧、基础载波、COT、CP-OFDM 参数（$T_s$、$T_{\mathrm{CP}}$、$T_{\mathrm{Symb}}$）；
+  \item \textbf{6.2.3/6.2.4}：SAB 结构与 FTS/STS，是 3D-FISA 与多域同步的检测对象；
+  \item \textbf{6.2.5/6.2.6}：产生映射到 RE 的 $a_{k,l}^{(p)}$ 的前端处理；
+  \item \textbf{6.3}：灵活带宽派生系统（下一章），基带/上变频思想可随 $\alpha$ 缩放。
+\end{itemize}
+
+\begin{center}
+\small\textcolor{gray}{—— 学习资料仅供教学理解，精确参数、伪代码与图表以 T/XS 10001-2025 正式标准为准 ——}
+\end{center}
+
+\end{document}
