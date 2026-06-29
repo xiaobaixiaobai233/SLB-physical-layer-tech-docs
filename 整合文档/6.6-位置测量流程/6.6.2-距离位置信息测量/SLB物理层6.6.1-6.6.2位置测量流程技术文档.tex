@@ -1,0 +1,601 @@
+% !TEX program = xelatex
+\documentclass[11pt,a4paper]{ctexart}
+
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{longtable}
+
+\geometry{left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm}
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  backgroundcolor=\color{gray!8},
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false
+}
+
+\title{%
+  \textbf{星闪 SLB 物理层}\\[0.4em]
+  \Large 6.6.1\textasciitilde 6.6.2 位置测量流程技术文档\\[0.3em]
+  \large 概述 \textbullet\ RTT 测距 \textbullet\ FLAG 快速定位 \textbullet\ 跳频复合信道测距
+}
+\author{依据 T/XS 10001-2025《星闪无线通信系统 接入层\\
+同步低时延宽带空口 SLB 技术要求和测试方法》整理\\
+（团体标准 20250326 版）\\[0.5em]
+代码文件：\texttt{slb\_phy\_positioning.h} / \texttt{slb\_phy\_positioning.c}}
+\date{}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+%======================================================================
+\section{协议章节对应}
+%======================================================================
+
+本节对应星闪 SLB 接入层物理层协议 T/XS 10001-2025 第 6.6 节``位置测量流程''，具体涵盖：
+\begin{itemize}[nosep]
+  \item \textbf{6.6.1} 概述——G 节点配置位置锚点、位置标签、位置信息解算节点；XRC 静态配置与 GCI/TCI 动态调度；测量信息汇聚；
+  \item \textbf{6.6.2.1} 基于 RTT 的测距——双向两/三信号交互、时间差上报与距离解算公式；
+  \item \textbf{6.6.2.2} 测量组快速定位（FLAG）——M2M/DL/SUL/AUL 组播测距流程；
+  \item \textbf{6.6.2.3} 基于双向复合信道的测距——跳频 CSI 测量、复合与距离解算。
+\end{itemize}
+
+角度测量（6.6.3）与坐标解算（6.6.4）不在本文档范围，但与本模块输出（距离、TOA、CSI）直接衔接。
+
+%======================================================================
+\section{功能定义}
+%======================================================================
+
+本模块为 SLB 120\,kHz 物理层\textbf{位置服务}提供流程编排与测距解算能力。6.6.1\textasciitilde 6.6.2 不重新定义 PMS 生成（6.2.3.9）或测量量量化（6.5.5.6\textasciitilde 6.5.5.8），只规定\textbf{谁参与、何时发收、如何上报、如何算距离}。
+
+G 节点通过 XRC 与 GCI/TCI 组织锚点/标签交互；各节点按 6.5.5.7 产生 $t_1$--$t_6$ 或按 6.5.5.6 产生 CSI；本模块负责 RTT 距离公式、FLAG 测量组时序与跳频复合测距流程。
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lllll}
+\toprule
+\textbf{节号} & \textbf{名称} & \textbf{输入} & \textbf{输出} & \textbf{典型用途} \\
+\midrule
+6.6.1 & 概述/配置 & XRC、GCI/TCI & 角色与资源配置 & 定位系统初始化 \\
+6.6.2.1 & RTT 测距 & $T_a,T_b$（或 $+T_c,T_d$） & 距离 $D$ & 点对点精确测距 \\
+6.6.2.2 & FLAG & 测量组配置、组内顺序 PMS & 批量 RTT/TDOA 报告 & 多标签快速定位 \\
+6.6.2.3 & 跳频复合 & 多载波 CSI & 复合 CSI、距离 $D$ & 大带宽等效测距 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{模块边界（上下游及职责划分）}
+%======================================================================
+
+\subsection{上游模块（输入来源）}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{4.2cm}p{4.5cm}p{5.5cm}}
+\toprule
+\textbf{上游模块} & \textbf{输入给本模块的内容} & \textbf{说明} \\
+\midrule
+XRC 信令解析 & 锚点/标签/解算节点角色、静态资源 & 载波、带宽、序列类型 \\
+GCI/TCI 解析（6.2.4） & 动态时频/端口/波束资源 & 格式 1--4 激活测量 \\
+6.5.5.7 时间差测量 & $t_1\ldots t_6$ 或 $T_a\ldots T_d$ & RTT 原始量 \\
+6.5.5.6 PMS CSI & 各载波 IQ + RPL & 跳频复合测距 \\
+6.2.3.9 PMS 生成 & 专用/安全 PMS 符号 & 空口交互载体 \\
+T 能力反馈 & OFDM 测量/定位能力位 & 决定必选/可选流程 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{下游模块（输出去向）}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{4.2cm}p{4.5cm}p{5.5cm}}
+\toprule
+\textbf{下游模块} & \textbf{本模块输出} & \textbf{说明} \\
+\midrule
+6.6.4 定位信息解算 & 距离 $D$、TOA 集合 & 多锚点融合坐标 \\
+MAC/RRC 位置上报 & 测量时间差报告消息 & FLAG 组播/顺序上报 \\
+G 节点调度器 & 测量组激活/去激活状态 & GCI 第四格式 \\
+空口发射/接收（6.2.3） & PMS 发收时序触发 & 按测量组顺序执行 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{本模块不负责的内容}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{5.5cm}p{8.5cm}}
+\toprule
+\textbf{不负责内容} & \textbf{原因} \\
+\midrule
+PMS 频域序列生成 & 由 6.2.3.9 负责 \\
+TOA/TOD/AoA 物理测量 & 由 6.5.5.6\textasciitilde 6.5.5.8 负责 \\
+角度测量与坐标融合 & 由 6.6.3/6.6.4 负责 \\
+XRC/GCI 比特域编码 & 由 6.2.4 负责 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{在 SLB 通信流程中的角色}
+%======================================================================
+
+\begin{itemize}
+  \item \textbf{配置阶段（6.6.1）}：G 节点 XRC 配置三类角色 $\rightarrow$ 可选 GCI/TCI 动态指示 $\rightarrow$ 锚点/标签进入待命；
+  \item \textbf{RTT 测距（6.6.2.1）}：双向 PMS 交互 $\rightarrow$ 6.5.5.7 得 $t_1$--$t_6$ $\rightarrow$ 本模块算 $D$ $\rightarrow$ 6.6.4 解算坐标；
+  \item \textbf{批量定位（6.6.2.2）}：测量组建立 $\rightarrow$ SAB 同步 $\rightarrow$ GCI-4 激活 $\rightarrow$ 顺序 PMS $\rightarrow$ 时间差/TOA 报告；
+  \item \textbf{跳频测距（6.6.2.3）}：多载波 CSI 交互 $\rightarrow$ CSI 反馈 $\rightarrow$ 双向复合 $\rightarrow$ 距离解算。
+\end{itemize}
+
+\textbf{推荐复用策略}：维护一份 \texttt{slb\_phy\_positioning} 库；RTT 解算、FLAG 状态机、跳频 CSI 复合分接口实现；G 节点侧调度与 T 节点侧测量上报共用同一距离公式与参数校验。
+
+%======================================================================
+\section{强制要求与关键参数}
+%======================================================================
+
+\subsection{6.6.1 概述}
+
+\textbf{三类角色}：位置锚点、位置标签、位置信息解算节点；G/T 节点均可担任任一角色。
+
+\textbf{位置信息类型}：绝对（经纬度+海拔）或相对（相对参考点偏移）。
+
+\textbf{配置模式}：
+\begin{itemize}[nosep]
+  \item \textbf{纯 XRC}：TTI/超帧/符号、端口、波束、载波、带宽、序列一次性配置；
+  \item \textbf{XRC + 动态信令}：载波/带宽/序列由 XRC 固定；帧/符号/端口/波束由 GCI/TCI 动态指示。
+\end{itemize}
+
+\textbf{可选测量任务}：发送侧 TOD；接收侧 TOA、AoA、AoD、CSI。
+
+\subsection{6.6.2.1 基于 RTT 的测距}
+
+\textbf{能力要求}：支持 OFDM 测量/定位的 T 节点\textbf{必选} RTT。
+
+\textbf{时间符号}（与 6.5.5.7 一致，本地参考时间坐标系；信号起点为第一个测量符号开端）：
+\begin{itemize}[nosep]
+  \item $t_1$：第一 PMS 离开第一节点发送天线连接器 $-$ 本地参考；
+  \item $t_2$：第一 PMS 到达第二节点接收天线连接器 $-$ 本地参考；
+  \item $t_3$：第二 PMS 离开第二节点发送天线连接器 $-$ 本地参考；
+  \item $t_4$：第二 PMS 到达第一节点接收天线连接器 $-$ 本地参考。
+\end{itemize}
+
+\textbf{双向两信号}：
+\begin{align}
+T_a &= t_4 - t_1, \quad T_b = t_3 - t_2 \\
+D &= \frac{T_a - T_b}{2} \cdot C
+\end{align}
+
+\textbf{双向三信号}（额外 $t_5,t_6$，见 6.5.5.7）：
+\begin{align}
+T_a &= t_4 - t_1, \quad T_c = t_5 - t_4, \quad
+T_b = t_3 - t_2, \quad T_d = t_6 - t_3 \\
+D &= \frac{T_a T_d - T_b T_c}{T_a + T_d + T_b + T_c} \cdot C
+\end{align}
+
+$C$ 为光速。多端口/多波束 PMS 时，$t_1$--$t_6$ 须基于多个分量联合测量。
+
+\textbf{资源指示}：GCI 格式 1--3，或 XRC 位置测量信号配置消息/测量组参数配置消息。
+
+\subsection{6.6.2.2 测量组快速定位（FLAG）}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{模式} & \textbf{锚点发 PMS} & \textbf{标签发 PMS} & \textbf{定位原理} \\
+\midrule
+M2M-FLAG & 是（三轮） & 是（一轮） & 多对多 RTT \\
+DL-FLAG & 是 & 否 & DL-TDOA \\
+SUL-FLAG & 收标签上行 & 是 & TDOA（锚点先 DL 同步） \\
+AUL-FLAG & 否 & 是 & 上行 TDOA \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{测量组建立消息}关键字段：测量组 ID；成员 PhyID 顺序（决定发 PMS 与上报顺序）；被测节点位图（锚点/标签）。
+
+\textbf{激活}：GCI 第四格式激活/去激活测量组；激活后 1 个或多个 TTI 内按序发 PMS。
+
+\textbf{M2M 时序约束}：锚点发完第一信号到标签发第二信号、标签发完第二信号到锚点发第三信号，各至少间隔 1 空闲符号；PMS 至少 2 测量符号；PMS 的 $u$ 与 G 同步块 $u$ 不同。
+
+\subsection{6.6.2.3 基于双向复合信道的测距}
+
+\textbf{跳频配置参数}（XRC 位置测量信号配置消息）：
+\begin{enumerate}[nosep]
+  \item 跳频载波信道号；2) PMS 带宽；3) 跳频图案；4) 端口/波束/重复次数；
+  \item 无线帧结构；6) 测量符号资源；7) $T_{\mathrm{RF}}=\max(T_{\mathrm{RF},1},T_{\mathrm{RF},2})$；
+  \item 连续/非连续发送；9) LBT 最大窗口期；10) CSI-RS/SRS/PMS 生成方式；
+  \item 子载波分组 $P$；12) CSI 平均或第 $k$ 符号模式。
+\end{enumerate}
+
+\textbf{前导版本域}：初始工作信道 = \texttt{00}；跳频信道 = \texttt{01}。
+
+\textbf{CSI 反馈}：全反馈（160 有效子载波）；或部分反馈（$P\in\{2,4,8\}$，见标准表 18）。
+
+%======================================================================
+\section{数据类型、长度/维度}
+%======================================================================
+
+\subsection{角色与配置结构 \texttt{slb\_pos\_role\_t}}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{字段} & \textbf{类型} & \textbf{取值} & \textbf{说明} \\
+\midrule
+\texttt{role} & \texttt{slb\_pos\_role\_e} & ANCHOR/TAG/COMPUTE & 节点角色 \\
+\texttt{phy\_id} & \texttt{uint16\_t} & --- & 物理层标识 \\
+\texttt{pos\_type} & \texttt{slb\_pos\_info\_e} & ABS/REL & 绝对/相对位置 \\
+\texttt{lon/lat/alt} & \texttt{double} & --- & 绝对或偏移坐标 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{RTT 测量输入 \texttt{slb\_pos\_rtt\_meas\_t}}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{字段} & \textbf{类型} & \textbf{长度} & \textbf{说明} \\
+\midrule
+\texttt{mode} & \texttt{slb\_pos\_rtt\_mode\_e} & 1 & TWO\_SIG / THREE\_SIG \\
+\texttt{t[6]} & \texttt{double} & 6 & $t_1\ldots t_6$（未用项可忽略） \\
+\texttt{Ta,Tb,Tc,Td} & \texttt{double} & 各 1 & 预计算时间差（可选） \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{FLAG 测量组 \texttt{slb\_pos\_meas\_group\_t}}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{字段} & \textbf{类型} & \textbf{长度} & \textbf{说明} \\
+\midrule
+\texttt{group\_id} & \texttt{uint8\_t} & 1 & 测量组 ID \\
+\texttt{mode} & \texttt{slb\_pos\_flag\_mode\_e} & 1 & M2M/DL/SUL/AUL \\
+\texttt{sig\_mode} & \texttt{slb\_pos\_sig\_mode\_e} & 1 & 两信号/三信号/循环三信号 \\
+\texttt{member\_cnt} & \texttt{uint8\_t} & 1 & 成员数 \\
+\texttt{phy\_id[]} & \texttt{uint16\_t *} & \texttt{member\_cnt} & 发/报顺序 \\
+\texttt{role\_bitmap} & \texttt{uint32\_t} & 位图 & 1=锚点，0=标签 \\
+\texttt{groupcast\_phy\_id} & \texttt{uint16\_t} & 1 & 组播地址 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{跳频配置 \texttt{slb\_pos\_hop\_cfg\_t}}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{字段} & \textbf{类型} & \textbf{说明} \\
+\midrule
+\texttt{init\_channel} & \texttt{uint16\_t} & 初始工作信道号 \\
+\texttt{hop\_pattern[]} & \texttt{uint16\_t *} & 跳频信道序列 \\
+\texttt{hop\_cnt} & \texttt{uint8\_t} & 跳频次数 \\
+\texttt{T\_RF} & \texttt{double} & 跳频稳定时长（s） \\
+\texttt{pms\_type} & \texttt{slb\_pos\_pms\_type\_e} & PMS/CSI-RS/SRS \\
+\texttt{csi\_group\_P} & \texttt{uint8\_t} & 子载波分组参数 \\
+\texttt{lbt\_max\_window} & \texttt{double} & LBT 最大窗口期 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{时序关系}
+%======================================================================
+
+\begin{itemize}[nosep]
+  \item \textbf{RTT}：第一 PMS TX $\rightarrow$ 第二 PMS RX/TX $\rightarrow$（三信号时第三 PMS）$\rightarrow$ 上报 $T_a,T_b$ $\rightarrow$ 解算 $D$；
+  \item \textbf{FLAG}：测量组建立 + 参数配置 $\rightarrow$ SAB $\rightarrow$ GCI-4 激活 $\rightarrow$ 组内顺序 PMS $\rightarrow$ 测量报告；
+  \item \textbf{跳频}：初始信道配置 $\rightarrow$ 双向 CSI 交互 $\rightarrow$ 跳频至下一信道（等待 $T_{\mathrm{RF}}$）$\rightarrow$ 循环 $\rightarrow$ 回初始信道反馈 CSI；
+  \item \textbf{同步基准}：跳频测量中 T 节点以 G 同步信号/测量帧为基准。
+\end{itemize}
+
+%======================================================================
+\section{接口表格（明确的输入/输出）}
+%======================================================================
+
+\subsection{\texttt{slb\_pos\_rtt\_calc\_distance}}
+
+\begin{longtable}{p{2.4cm}p{2.8cm}p{1.2cm}p{1.5cm}p{2.2cm}p{4.3cm}}
+\toprule
+\textbf{参数} & \textbf{类型} & \textbf{长度} & \textbf{必需} & \textbf{来源} & \textbf{说明} \\
+\midrule
+\endhead
+\texttt{mode} & \texttt{slb\_pos\_rtt\_mode\_e} & 1 & 是 & 测量配置 & 两/三信号 \\
+\texttt{meas} & \texttt{const slb\_pos\_rtt\_meas\_t *} & 1 & 是 & 6.5.5.7 & $t_1$--$t_6$ 或 $T_a$--$T_d$ \\
+\texttt{speed\_of\_light} & \texttt{double} & 1 & 是 & 常量 & 默认 $C$ \\
+\texttt{distance\_m} & \texttt{double *} & 1 & 是 & 调用方 & 输出距离（m） \\
+\bottomrule
+\end{longtable}
+
+\subsection{\texttt{slb\_pos\_flag\_group\_setup}}
+
+输入：\texttt{slb\_pos\_meas\_group\_t}、XRC 解析结果；输出：组内发 PMS 顺序表、上报顺序表、角色校验结果。
+
+\subsection{\texttt{slb\_pos\_flag\_on\_gci\_activate}}
+
+输入：GCI 第四格式（测量组 ID、激活/去激活）；输出：组状态 \texttt{IDLE/ACTIVE/DONE}，触发顺序发 PMS 回调。
+
+\subsection{\texttt{slb\_pos\_hop\_run\_step}}
+
+输入：\texttt{slb\_pos\_hop\_cfg\_t}、当前信道索引、本跳 CSI；输出：下一信道索引、是否完成、CSI 反馈缓冲。
+
+\subsection{\texttt{slb\_pos\_composite\_csi\_distance}}
+
+输入：第一/第二节点各载波 CSI（IQ）；输出：复合 CSI、估计距离 $D$。
+
+%======================================================================
+\section{处理步骤}
+%======================================================================
+
+\subsection{6.6.1 配置流程}
+
+\begin{enumerate}
+  \item G 节点解析 XRC，分配锚点/标签/解算节点角色与静态资源；
+  \item 可选：通过 GCI/TCI 动态指示帧/符号/端口/波束；
+  \item 配置可选测量项（TOD/TOA/AoA/AoD/CSI）及上报目标；
+  \item 成员进入待命，等待测量触发（GCI 或测量组激活）。
+\end{enumerate}
+
+\subsection{6.6.2.1 RTT 两信号测距}
+
+\begin{enumerate}
+  \item 第一位置节点在配置资源发送第一 PMS，记录 $t_1$；第二节点接收，记录 $t_2$；
+  \item 第二节点发送第二 PMS，记录 $t_3$；第一节点接收，记录 $t_4$；
+  \item 第一节点算 $T_a=t_4-t_1$，第二节点算 $T_b=t_3-t_2$；
+  \item 上报解算节点，调用 \texttt{slb\_pos\_rtt\_calc\_distance}（\texttt{TWO\_SIG}）得 $D$。
+\end{enumerate}
+
+\subsection{6.6.2.1 RTT 三信号测距}
+
+在步骤 2 之后增加第三 PMS 交互，得到 $t_5,t_6$ 及 $T_c,T_d$；解算采用三信号公式。
+
+\subsection{6.6.2.2 M2M-FLAG 流程}
+
+\begin{enumerate}
+  \item G 组播测量组建立消息 + 参数配置 + 配置组播地址；
+  \item 发 SAB 同步全组成员；GCI-4 激活测量组；
+  \item 锚点按 PhyID 顺序发第一 PMS $\rightarrow$ 标签发第二 PMS $\rightarrow$ 锚点发第三 PMS（三信号模式）；
+  \item 按 \texttt{measReportDirection} 顺序上报时间差；G 融合各标签 RTT 结果。
+\end{enumerate}
+
+\subsection{6.6.2.3 跳频复合测距}
+
+\begin{enumerate}
+  \item 初始信道：能力交互 + 跳频配置（前导版本 \texttt{00}）；
+  \item 初始信道双向 PMS/CSI 交互；
+  \item 按跳频图案切换信道（等待 $T_{\mathrm{RF}}$，非连续模式执行 LBT；跳频信道前导 \texttt{01}）；
+  \item 各跳完成后回初始信道，经位置测量信号测量反馈消息上报 CSI；
+  \item 解算节点对各载波 CSI 做双向复合，估计距离。
+\end{enumerate}
+
+%======================================================================
+\section{状态机与时序}
+%======================================================================
+
+\subsection{RTT 会话状态}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{状态} & \textbf{进入条件} & \textbf{下一状态} \\
+\midrule
+\texttt{IDLE} & 初始/完成 & \texttt{TX\_SIG1}（GCI 触发） \\
+\texttt{TX\_SIG1} & 发第一 PMS & \texttt{RX\_SIG2} \\
+\texttt{RX\_SIG2} & 收第二 PMS & \texttt{REPORT}（两信号）或 \texttt{TX\_SIG3} \\
+\texttt{TX\_SIG3} & 三信号模式 & \texttt{RX\_SIG3} $\rightarrow$ \texttt{REPORT} \\
+\texttt{REPORT} & 上报 $T_a$ 等 & \texttt{IDLE} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{FLAG 测量组状态}
+
+\texttt{UNCONFIGURED} $\rightarrow$ \texttt{CONFIGURED}（建立消息）$\rightarrow$ \texttt{SYNCED}（SAB）$\rightarrow$ \texttt{ACTIVE}（GCI-4）$\rightarrow$ \texttt{MEASURING}（顺序 PMS）$\rightarrow$ \texttt{REPORTING} $\rightarrow$ \texttt{IDLE}。
+
+\subsection{跳频测量状态}
+
+\texttt{INIT\_CHANNEL} $\rightarrow$ \texttt{MEAS\_INTERACT} $\rightarrow$ \texttt{HOP\_WAIT\_TRF} $\rightarrow$ \texttt{NEXT\_CHANNEL} $\rightarrow$ \ldots $\rightarrow$ \texttt{RETURN\_INIT} $\rightarrow$ \texttt{CSI\_FEEDBACK}。
+
+%======================================================================
+\section{协议中允许本模块改变的参数}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{参数} & \textbf{来源} & \textbf{影响} \\
+\midrule
+RTT 两/三信号模式 & XRC/GCI & 空口轮数与解算公式 \\
+FLAG 模式（M2M/DL/SUL/AUL） & 测量组参数配置 & 谁发 PMS、TDOA/RTT \\
+成员 PhyID 顺序 & 测量组建立消息 & 发 PMS 与上报顺序 \\
+PMS $u$ 参数 & 测量组参数配置 & 与同步块 $u$ 隔离 \\
+跳频图案、$T_{\mathrm{RF}}$ & 位置测量信号配置 & 测距精度与切换时延 \\
+CSI 反馈 $P$ & 测距协商 & 反馈量与测距范围 \\
+安全 PMS 开关 & XRC + 能力 & 测距信号类型 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{约束与极限条件}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{4.5cm}p{9.5cm}}
+\toprule
+\textbf{约束} & \textbf{处理建议} \\
+\midrule
+RTT 必选 & 不支持 OFDM 测量/定位则不进入 6.6.2 \\
+$|T_a-T_b|$ 过小 & 检查 $t_1$--$t_4$ 联合测量与时钟校准 \\
+M2M 阶段间隔 & 相邻阶段至少 1 空闲符号，否则拒配 \\
+PMS 符号数 & FLAG 下至少 2 测量符号 \\
+DL-FLAG 锚点间隔 & $\ge 1$ 符号；SUL 步骤 3 标签间隔 $\ge 0$ \\
+跳频 $T_{\mathrm{RF}}$ & 取两端 max，切换前必须等待 \\
+LBT 超时 & 按图案切下一跳，避免单信道阻塞 \\
+DC 子载波 & CSI 反馈不含 \#80（6.5.5.6） \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{链路调用对照表}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llcc}
+\toprule
+\textbf{流程/信令} & \textbf{标准位置} & \textbf{6.6.1} & \textbf{6.6.2} \\
+\midrule
+XRC 锚点/标签配置 & 6.6.1 & 配置 & --- \\
+GCI 格式 1--3（RTT 资源） & 6.6.2.1 & 动态调度 & RTT \\
+GCI 格式 4（测量组激活） & 6.6.2.2 & --- & FLAG \\
+测量组建立/参数配置 & 6.6.2.2.1 & --- & FLAG \\
+测量时间差报告 & 6.6.2.2 & --- & FLAG/RTT \\
+位置测量信号测量反馈 & 6.6.2.3.3 & --- & 跳频 CSI \\
+PMS 生成（专用/安全） & 6.2.3.9 & --- & 信号载体 \\
+时间差 $t_1$--$t_6$ & 6.5.5.7 & --- & RTT 输入 \\
+PMS CSI & 6.5.5.6 & --- & 跳频输入 \\
+定位坐标解算 & 6.6.4 & --- & 下游 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{API 速查}
+%======================================================================
+
+\begin{lstlisting}[language=C]
+/* 6.6.1 角色与配置 */
+int slb_pos_role_config(const slb_pos_role_t *roles, uint32_t count);
+int slb_pos_apply_xrc_resource(const slb_pos_xrc_cfg_t *cfg);
+int slb_pos_apply_gci_resource(const slb_pos_gci_cfg_t *cfg);
+
+/* 6.6.2.1 RTT */
+int slb_pos_rtt_calc_distance(const slb_pos_rtt_calc_t *cfg, double *distance_m);
+int slb_pos_rtt_build_report(const slb_pos_rtt_meas_t *meas,
+                             slb_pos_time_diff_report_t *report);
+
+/* 6.6.2.2 FLAG */
+int slb_pos_flag_group_setup(const slb_pos_meas_group_t *group);
+int slb_pos_flag_on_gci_activate(uint8_t group_id, bool activate);
+int slb_pos_flag_next_tx_member(slb_pos_meas_group_t *group, uint16_t *phy_id);
+
+/* 6.6.2.3 跳频复合 */
+int slb_pos_hop_run_step(slb_pos_hop_ctx_t *ctx);
+int slb_pos_composite_csi(const slb_pos_csi_hop_t *hop_a,
+                          const slb_pos_csi_hop_t *hop_b,
+                          slb_pos_composite_csi_t *out);
+int slb_pos_csi_to_distance(const slb_pos_composite_csi_t *csi,
+                              double *distance_m);
+\end{lstlisting}
+
+%======================================================================
+\section{错误码}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\begin{tabular}{cll}
+\toprule
+\textbf{宏} & \textbf{值} & \textbf{含义} \\
+\midrule
+\texttt{SLB\_POS\_OK} & 0 & 成功 \\
+\texttt{SLB\_POS\_ERR\_PARAM} & $-1$ & 非法角色/模式/空指针 \\
+\texttt{SLB\_POS\_ERR\_STATE} & $-2$ & 状态机不允许当前操作 \\
+\texttt{SLB\_POS\_ERR\_CAP} & $-3$ & 终端不支持所选 FLAG/跳频模式 \\
+\texttt{SLB\_POS\_ERR\_TIMING} & $-4$ & 时间差无效或 $T_a,T_b$ 不一致 \\
+\texttt{SLB\_POS\_ERR\_GROUP} & $-5$ & 测量组成员/位图配置冲突 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{工程集成说明}
+%======================================================================
+
+\subsection{文件结构}
+
+\begin{lstlisting}
+6.6-位置测量流程/
+  slb_phy_positioning.h
+  slb_phy_positioning.c
+  slb_phy_positioning_test.c
+  SLB物理层6.6.1-6.6.2位置测量流程技术文档.tex
+  星闪SLB物理层6.6.1-6.6.2位置测量流程-详细学习资料.pdf
+\end{lstlisting}
+
+\subsection{模块依赖}
+
+\begin{lstlisting}[language=C]
+#include "slb_phy_common.h"      /* 6.5.1-6.5.3 若需 CRC/Gold */
+#include "slb_phy_pwr_meas.h"    /* 6.5.5.6-6.5.5.8 测量量 */
+/* PMS 生成与 GCI 解析由 6.2 子模块提供 */
+\end{lstlisting}
+
+\subsection{编译}
+
+\begin{lstlisting}[language=bash]
+cc -std=c99 -Wall -Wextra -c slb_phy_positioning.c -o slb_phy_positioning.o
+cc your_phy_module.c slb_phy_positioning.o slb_phy_pwr_meas.o -lm -o your_phy_app
+cc -std=c99 slb_phy_positioning.c slb_phy_positioning_test.c -lm -o slb_phy_positioning_test
+./slb_phy_positioning_test
+\end{lstlisting}
+
+\subsection{与学习资料的分工}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{ll}
+\toprule
+\textbf{文档} & \textbf{用途} \\
+\midrule
+详细学习资料 & 概念讲解、公式直觉、初学者阅读 \\
+本技术文档 & 模块边界、接口、状态机、工程实现与联调 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\vfill
+\begin{center}
+\small\textcolor{gray}{精确参数与字段定义以 T/XS 10001-2025 正式标准为准；本文档仅供 SLB 物理层实现与联调参考。}
+\end{center}
+
+\end{document}
