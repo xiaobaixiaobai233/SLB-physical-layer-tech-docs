@@ -1,0 +1,745 @@
+% !TEX program = xelatex
+\documentclass[11pt,a4paper]{ctexart}
+
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{longtable}
+
+\geometry{left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm}
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  backgroundcolor=\color{gray!8},
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false
+}
+
+\newcommand{\dBm}{\,\mathrm{dBm}}
+\newcommand{\dB}{\,\mathrm{dB}}
+
+\title{%
+  \textbf{星闪 SLB 物理层}\\[0.4em]
+  \Large 6.5.4\textasciitilde 6.5.5 功率控制与测量量技术文档\\[0.3em]
+  \large 功率控制 \textbullet\ 通信链路测量量 \textbullet\ 位置测量量
+}
+\author{依据 T/XS 10001-2025《星闪无线通信系统 接入层\\
+同步低时延宽带空口 SLB 技术要求和测试方法》整理\\
+（团体标准 20250326 版）\\[0.5em]
+代码文件：\texttt{slb\_phy\_pwr\_meas.h} / \texttt{slb\_phy\_pwr\_meas.c}}
+\date{}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+%======================================================================
+\section{协议章节对应}
+%======================================================================
+
+本节对应星闪 SLB 接入层物理层协议 T/XS 10001-2025 第 6.5 节``共性基础算法''中功率控制与测量量子节，具体涵盖：
+\begin{itemize}[nosep]
+  \item \textbf{6.5.4} 功率控制——T 节点在 T 符号上发射 SRS、DMRS、PAS、接入、ACK、第一类/第二类数据等信号时的初始总功率计算、多信号功率汇总与 $P_{\mathrm{MAX}}$ 限幅；
+  \item \textbf{6.5.5} 测量量——G/T 节点对同步参考信号、整符号接收能量、信道占用及位置测量信号（PMS）的量化定义，含 RSRP、RSSI、RSRQ、SINR、CBRA、PMS CSI、时间差与 AoA。
+\end{itemize}
+
+%======================================================================
+\section{功能定义}
+%======================================================================
+
+本模块为 SLB 120\,kHz 物理层中 T 链路发射功率决策与各类链路/位置测量提供统一算法库。6.5.4\textasciitilde 6.5.5 不规定具体调度策略或上报流程，只规定\textbf{怎么算}发射功率与测量量。
+
+T 节点 SRS、接入、ACK、数据等业务在 T 符号上的发射功率均依赖 6.5.4 开环功控；路径损耗 $P_L$ 由 6.5.5.1 RSRP 与 G 链路参考功率差值得到。G/T 节点的链路自适应、接入判决、LBT/CBRA 及 6.6 测距流程均依赖 6.5.5 各测量量。
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lllll}
+\toprule
+\textbf{节号} & \textbf{名称} & \textbf{输入} & \textbf{输出} & \textbf{典型链路用途} \\
+\midrule
+6.5.4 & 功率控制 & $M,P_o,P_L$ 或 RSRP 等 & $P$（dBm）/ 限幅后每子载波功率 & T 符号 SRS/接入/ACK/数据发射 \\
+6.5.5.1 & RSRP & 第一训练信号 RE 功率 & 线性平均功率（W/dBm） & 路径损耗、选网、RSRQ/SINR 分子 \\
+6.5.5.2 & RSSI & 整 CP-OFDM 符号总接收功率 & 线性平均功率 & RSRQ/SINR 分母、CBRA 辅助 \\
+6.5.5.3 & RSRQ & RSRP、RSSI（同符号） & 无量纲比 & 负载感知下的链路质量 \\
+6.5.5.4 & SINR & RSRP、RSSI（同符号） & 无量纲比 & MCS、调度、HARQ \\
+6.5.5.5 & CBRA & 符号/帧内功率 + DT 解析 & 时间占比 $T_{\mathrm{busy}}/T_{\mathrm{measure}}$ & LBT、直通竞争、信道占用 \\
+6.5.5.6 & PMS CSI & 测距符号频域接收 & IQ[linear] + RPL & RTT 测距、NLOS 识别 \\
+6.5.5.7 & PMS 时间差 & TOA/TOD 时间戳 & $T$ 或 $T_1,T_2$ & 6.6 双向测距 \\
+6.5.5.8 & PMS AoA & 阵列接收特征 & 水平角、垂直角 & 定位、感知 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{模块边界（上下游及职责划分）}
+%======================================================================
+
+\subsection{上游模块（输入来源）}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{4.2cm}p{4.5cm}p{5.5cm}}
+\toprule
+\textbf{上游模块} & \textbf{输入给本模块的内容} & \textbf{说明} \\
+\midrule
+XRC/系统消息解析 & 各业务 $P_o$（Nominal 配置 IE） & \texttt{srs/rach/ack/data-Class1/2-P0-NominalConfig} \\
+G 链路配置 & \texttt{gLinkReferenceSignalPower} & G 链路参考信号已知功率（dBm） \\
+同步/训练信号接收（6.2） & 第一训练信号频域样本 & RSRP/RSSI 测量对象 \\
+帧调度模块 & $M$（子载波数）、$N$（同符号业务数）、$K$（符号总子载波数） & 功控与限幅参数 \\
+射频能力/法规配置 & $P_{\mathrm{MAX}}$（$\hat{P}_{\mathrm{MAX}}$ 线性域） & T 节点最大发射功率 \\
+PMS 接收处理（6.2.3/6.6） & 测距符号 IQ、TOA/TOD 时间戳、阵列数据 & 位置类测量量 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{下游模块（输出去向）}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{4.2cm}p{4.5cm}p{5.5cm}}
+\toprule
+\textbf{下游模块} & \textbf{本模块输出} & \textbf{说明} \\
+\midrule
+T 链路发射机/功放 & 每 T 符号/子载波发射功率 & 6.5.4 限幅后 $\hat{P}_k$ \\
+6.5.4 路径损耗计算 & RSRP & $P_L=\texttt{gLinkReferenceSignalPower}-\mathrm{RSRP}$ \\
+MAC/RRC 测量上报 & RSRP/RSSI/RSRQ/SINR/CBRA & 链路自适应、切换、LBT 决策 \\
+6.6 位置测量流程 & PMS CSI、时间差 $T$、AoA & RTT 距离解算、定位融合 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{本模块不负责的内容}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{5.5cm}p{8.5cm}}
+\toprule
+\textbf{不负责内容} & \textbf{原因} \\
+\midrule
+闭环 TPC 累积修正 & 标准 6.5.4 为开环功控，无 TPC 命令累积项 \\
+$P_o$ 与参考功率的配置下发 & 由 XRC/系统消息/RRC 负责 \\
+测量触发与上报周期 & 由 MAC/RRC 负责 \\
+PMS 信号生成与资源映射 & 由 6.2.3 与 6.6 负责 \\
+RTT 距离最终解算 & 6.5.5.7 仅定义时间差，解算在 6.6 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{在 SLB 通信流程中的角色}
+%======================================================================
+
+\begin{itemize}
+  \item \textbf{T 链路发射（6.2.3/6.2.4/6.2.5）}：6.5.5.1 测 RSRP $\rightarrow$ 6.5.4 算 $P_L$ 与 $P$ $\rightarrow$ 发射机按功率映射 RE；
+  \item \textbf{链路质量评估}：6.5.5.1\textasciitilde 6.5.5.4 同符号测量 $\rightarrow$ RSRQ/SINR $\rightarrow$ MCS/调度；
+  \item \textbf{信道占用感知}：6.5.5.5 CBRA $\rightarrow$ LBT/直通资源竞争；
+  \item \textbf{位置服务（6.6）}：6.5.5.6\textasciitilde 6.5.5.8 $\rightarrow$ RTT/AoA 融合测距。
+\end{itemize}
+
+\textbf{推荐复用策略}：工程上维护一份 \texttt{slb\_phy\_pwr\_meas} 库；功控模块传入业务类型与 $M$；测量模块按测量类型传入频域/时域样本；多天线场景在模块内统一取 max 规则。
+
+%======================================================================
+\section{强制要求与关键参数}
+%======================================================================
+
+\subsection{6.5.4 功率控制}
+
+\textbf{适用范围}：T 节点在 T 符号上发送 SRS、DMRS、PAS、接入信息、ACK、第一类/第二类数据及其配套参考信号时适用。
+
+\textbf{单信号/信息初始总功率}（对数域）：
+\begin{equation}
+P = 10\log_{10}(M) + P_o + P_L
+\label{eq:power}
+\end{equation}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llp{7cm}}
+\toprule
+\textbf{符号} & \textbf{单位} & \textbf{含义} \\
+\midrule
+$P$ & dBm & 该 T 符号、相应子载波集合上的初始总功率 \\
+$M$ & 无量纲 & 本次发送占用的子载波个数 \\
+$P_o$ & dBm & 该信号/信息的目标接收功率（G 节点配置） \\
+$P_L$ & dB & 路径损耗 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{路径损耗}：
+\begin{equation}
+P_L = \texttt{gLinkReferenceSignalPower} - \mathrm{RSRP}
+\label{eq:pl}
+\end{equation}
+
+\textbf{各业务 $P_o$ 配置 IE}：
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{ll}
+\toprule
+\textbf{业务类型} & \textbf{配置参数名} \\
+\midrule
+信道探测信号（SRS） & \texttt{srs-P0-NominalConfig} \\
+接入信息及其 DMRS、PAS & \texttt{rach-P0-NominalConfig} \\
+ACK 反馈及其 DMRS & \texttt{ack-P0-NominalConfig} \\
+第一类数据及其 DMRS、PAS & \texttt{data-Class1-P0-NominalConfig} \\
+第二类数据及其 DMRS、PAS & \texttt{data-Class2-P0-NominalConfig} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{多信号同 T 符号功率汇总与限幅}：对 $N$ 个信号/信息，先分别得线性域 $\hat{P}_i$，再
+\begin{equation}
+\hat{P} = \min\left\{\hat{P}_{\mathrm{MAX}},\; \sum_{i=0}^{N-1} \hat{P}_i \right\}
+\end{equation}
+超限时符号共 $K$ 个子载波均分：$\hat{P}_k = \hat{P}_{\mathrm{MAX}}/K$。
+
+\textbf{标准算例}：$\texttt{gLinkReferenceSignalPower}=-10\,\dBm$，$\mathrm{RSRP}=-70\,\dBm$，则 $P_L=60\,\dB$；ACK 的 $P_o=-100\,\dBm$，$M=12$，则 $P\approx 10.79-100+60=-29.2\,\dBm$。
+
+\subsection{6.5.5.1 同步参考信号接收功率（RSRP）}
+
+RSRP 为 T 节点在\textbf{第一训练信号所在符号}上，对\textbf{第一训练信号}各有效子载波接收功率（W）取\textbf{线性平均}。多天线取各天线测量值的\textbf{最大值}上报。
+
+\subsection{6.5.5.2 接收信号能量指示（RSSI）}
+
+RSSI 为一个 CP-OFDM 符号时长内，\textbf{整符号}总接收功率（W）在各有效子载波上的线性平均。含同频干扰、邻频泄漏与热噪声。多天线取 max。
+
+\subsection{6.5.5.3 同步参考信号接收质量（RSRQ）}
+
+\begin{equation}
+\mathrm{RSRQ} = \frac{\mathrm{RSRP}}{\mathrm{RSSI}}
+\end{equation}
+RSRP 与 RSSI 须\textbf{同一测量符号}；多天线取 max。
+
+\subsection{6.5.5.4 同步信号信干扰比（SINR）}
+
+\begin{equation}
+\mathrm{SINR} = \frac{\mathrm{RSRP}}{\mathrm{RSSI} - \mathrm{RSRP}}
+\end{equation}
+同符号测量；$\mathrm{RSSI}-\mathrm{RSRP}\approx I+N$；多天线取 max。
+
+\subsection{6.5.5.5 信道忙占比（CBRA）}
+
+\begin{equation}
+\mathrm{CBRA} = \frac{T_{\mathrm{busy}}}{T_{\mathrm{measure}}}
+\end{equation}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{场景} & \textbf{判定依据} & \textbf{门限} \\
+\midrule
+检测到 DT 前导 & 第一组同步序列符号功率线性均值 & $-87\,\dBm$ \\
+未检测到 DT 前导 & 单 CP-OFDM 符号总接收功率线性均值 & $-62\,\dBm$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+检测到 DT 前导时，在前导 + 数据帧整个持续时间内视为忙。
+
+\subsection{6.5.5.6 位置测量信号 CSI（PMS CSI）}
+
+频域模型 $\mathbf{y}_k = \mathbf{H}_k \mathbf{x}_k + \mathbf{n}$；CSI 为到达接收天线连接器处的信道系数估计。
+
+\textbf{IQ 联合编码}：
+\begin{equation}
+\mathrm{IQ[\dBm]} = 20\log_{10}\!\left(\frac{|\mathrm{IQ[linear]}|}{1024}\right) + \mathrm{RPL[\dBm]}
+\label{eq:iqdbm}
+\end{equation}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llp{6cm}}
+\toprule
+\textbf{字段} & \textbf{位宽} & \textbf{含义} \\
+\midrule
+IQ[linear] & 12 bit 有符号 & 相对线性幅度 \\
+RPL[dBm] & 12 bit 有符号 & 相对参考功率 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{两种模式}：模式 1——全测距帧内算术平均；模式 2——按第 $n$ 个测距符号在各跳频信道反馈。
+
+\subsection{6.5.5.7 位置测量信号时间差}
+
+\textbf{双向两信号}：$t_1$（TOD 第一 PMS 发送）、$t_2$（TOA 第一 PMS 接收）、$t_3$（TOD 第二 PMS 发送）、$t_4$（TOA 第二 PMS 接收）。第一位置节点 $T=t_4-t_1$；第二位置节点 $T=t_3-t_2$。
+
+\textbf{双向三信号}：额外 $t_5$（TOD 第三 PMS 发送）、$t_6$（TOA 第二 PMS 接收）。第一节点 $T_1=t_4-t_1$，$T_2=t_5-t_4$；第二节点 $T_1=t_3-t_2$，$T_2=t_6-t_3$。
+
+\subsection{6.5.5.8 位置测量信号到达角度（AoA）}
+
+参考坐标系：$Z$ 轴为椭球法线；$X$ 正南；$Y$ 正东。水平角相对 $X$ 轴逆时针 $[0,360)$ 度；垂直角相对 $Z$ 轴 $[0,180]$ 度。
+
+%======================================================================
+\section{数据类型、长度/维度}
+%======================================================================
+
+\subsection{6.5.4 功率控制接口 \texttt{slb\_pwr\_calc\_initial}}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lllll}
+\toprule
+\textbf{变量} & \textbf{方向} & \textbf{类型} & \textbf{长度} & \textbf{说明} \\
+\midrule
+\texttt{M} & 输入 & \texttt{uint16\_t} & 1 & 占用子载波数 \\
+\texttt{P0\_dBm} & 输入 & \texttt{float} & 1 & 目标接收功率 $P_o$ \\
+\texttt{PL\_dB} & 输入 & \texttt{float} & 1 & 路径损耗 $P_L$ \\
+\texttt{P\_dBm} & 输出 & \texttt{float *} & 1 & 初始总功率 $P$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{6.5.4 多信号汇总 \texttt{slb\_pwr\_aggregate}}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{变量} & \textbf{方向} & \textbf{类型} & \textbf{含义} \\
+\midrule
+\texttt{P\_lin[]} & 输入 & \texttt{const float *} & $N$ 个业务的线性功率（mW） \\
+\texttt{N} & 输入 & \texttt{uint8\_t} & 同符号业务数 \\
+\texttt{K} & 输入 & \texttt{uint16\_t} & 符号总子载波数 \\
+\texttt{Pmax\_lin} & 输入 & \texttt{float} & $\hat{P}_{\mathrm{MAX}}$（mW） \\
+\texttt{Pk\_lin[]} & 输出 & \texttt{float *} & 每子载波功率 $K$ 个 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{6.5.5 通信测量接口}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{接口} & \textbf{输入} & \textbf{输出} & \textbf{说明} \\
+\midrule
+\texttt{slb\_meas\_rsrp} & 训练 RE 线性功率[] & RSRP（W 或 dBm） & 6.5.5.1 \\
+\texttt{slb\_meas\_rssi} & 符号 RE 总功率[] & RSSI & 6.5.5.2 \\
+\texttt{slb\_meas\_rsrq} & RSRP, RSSI & RSRQ & 6.5.5.3 \\
+\texttt{slb\_meas\_sinr} & RSRP, RSSI & SINR & 6.5.5.4 \\
+\texttt{slb\_meas\_cbra} & 功率序列 + DT 标志 & CBRA $\in[0,1]$ & 6.5.5.5 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{6.5.5 位置测量接口}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{3.2cm}p{4.8cm}p{4.8cm}p{1.5cm}}
+\toprule
+\textbf{接口} & \textbf{输入} & \textbf{输出} & \textbf{说明} \\
+\midrule
+\texttt{slb\_meas\_pms\_csi} &
+测距符号频域 IQ[]、CSI 模式(1/2)、$N_{\mathrm{RX}}$/$N_{\mathrm{TX}}$ &
+\texttt{IQ[linear]}、\texttt{RPL[dBm]}（按子载波） &
+6.5.5.6 \\
+\texttt{slb\_meas\_pms\_timediff} &
+TOA/TOD 时间戳 $t_1\ldots t_6$、信号数(2/3)、节点角色 &
+$T$ 或 $T_1,T_2$ &
+6.5.5.7 \\
+\texttt{slb\_meas\_pms\_aoa} &
+阵列频域/空域接收快照[]、$N_{\mathrm{RX}}$ &
+水平角 $[0,360)$°、垂直角 $[0,180]$° &
+6.5.5.8 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{6.5.5.6 PMS CSI 接口 \texttt{slb\_meas\_pms\_csi}}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{2.2cm}p{0.9cm}p{2.8cm}p{0.7cm}p{5.8cm}}
+\toprule
+\textbf{变量} & \textbf{方向} & \textbf{类型} & \textbf{长度} & \textbf{说明} \\
+\midrule
+\texttt{freq\_iq[]} & 输入 & \texttt{const slb\_complex\_t *} & $N_{\mathrm{sc}}$ & 测距符号到达接收天线连接器的频域 IQ 样本 \\
+\texttt{mode} & 输入 & \texttt{uint8\_t} & 1 & 1=全测距帧算术平均；2=第 $n$ 个测距符号反馈 \\
+\texttt{n\_rx}, \texttt{n\_tx} & 输入 & \texttt{uint8\_t} & 1 & 接收/发送天线端口数 \\
+\texttt{n\_sc} & 输入 & \texttt{uint16\_t} & 1 & 有效子载波数（不含 DC） \\
+\texttt{iq\_linear[]} & 输出 & \texttt{int16\_t *} & $N_{\mathrm{sc}}$ & 12\,bit 有符号相对线性幅度 \\
+\texttt{rpl\_dBm[]} & 输出 & \texttt{int16\_t *} & $N_{\mathrm{sc}}$ & 12\,bit 有符号相对参考功率标尺 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{6.5.5.7 PMS 时间差接口 \texttt{slb\_meas\_pms\_timediff}}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{2.2cm}p{0.9cm}p{2.2cm}p{0.7cm}p{5.8cm}}
+\toprule
+\textbf{变量} & \textbf{方向} & \textbf{类型} & \textbf{长度} & \textbf{说明} \\
+\midrule
+\texttt{t[6]} & 输入 & \texttt{const double *} & 6 & PMS 本地参考时间下的 TOA/TOD：$t_1\ldots t_6$ \\
+\texttt{n\_signals} & 输入 & \texttt{uint8\_t} & 1 & 2=双向两信号；3=双向三信号 \\
+\texttt{node\_role} & 输入 & \texttt{uint8\_t} & 1 & 1=第一位置节点；2=第二位置节点 \\
+\texttt{T} & 输出 & \texttt{double *} & 1 & 两信号：第一节点 $T=t_4-t_1$，第二节点 $T=t_3-t_2$ \\
+\texttt{T1}, \texttt{T2} & 输出 & \texttt{double *} & 2 & 三信号：第一节点 $T_1=t_4-t_1$，$T_2=t_5-t_4$；第二节点 $T_1=t_3-t_2$，$T_2=t_6-t_3$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{6.5.5.8 PMS AoA 接口 \texttt{slb\_meas\_pms\_aoa}}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{2.4cm}p{0.9cm}p{2.8cm}p{1.2cm}p{5.3cm}}
+\toprule
+\textbf{变量} & \textbf{方向} & \textbf{类型} & \textbf{长度} & \textbf{说明} \\
+\midrule
+\texttt{array\_snap[]} & 输入 & \texttt{const slb\_complex\_t *} & $N_{\mathrm{RX}}\times N_{\mathrm{snap}}$ & PMS 在天线阵列处的频域/空域接收快照 \\
+\texttt{n\_rx} & 输入 & \texttt{uint8\_t} & 1 & 阵列天线单元数 \\
+\texttt{n\_snap} & 输入 & \texttt{uint16\_t} & 1 & 用于 DOA 估计的快照数 \\
+\texttt{azimuth\_deg} & 输出 & \texttt{float *} & 1 & 水平角，相对 $X$ 轴逆时针 $[0,360)$° \\
+\texttt{elevation\_deg} & 输出 & \texttt{float *} & 1 & 垂直角，相对 $Z$ 轴 $[0,180]$° \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{时序关系}
+%======================================================================
+
+\begin{itemize}[nosep]
+  \item \textbf{RSRP 测量}：第一训练信号符号到达后、T 符号发射前完成（供 $P_L$ 使用）；
+  \item \textbf{功控计算}：调度确定 $M$、业务类型与 $P_o$ 后、射频发射前；
+  \item \textbf{RSRQ/SINR}：RSRP 与 RSSI 须同符号、同测量窗口；
+  \item \textbf{CBRA}：在 $T_{\mathrm{measure}}$ 内持续采样符号功率；
+  \item \textbf{PMS 测量}：与 6.6 测距帧时序对齐，TOA/TOD 基于 PMS 本地参考时间。
+\end{itemize}
+
+%======================================================================
+\section{接口表格（明确的输入/输出）}
+%======================================================================
+
+\subsection{\texttt{slb\_pwr\_calc\_pathloss}}
+
+\begin{longtable}{p{2.5cm}p{2.5cm}p{1.5cm}p{1.5cm}p{2.5cm}p{4cm}}
+\toprule
+\textbf{参数} & \textbf{类型} & \textbf{长度} & \textbf{必需} & \textbf{来源} & \textbf{说明} \\
+\midrule
+\endhead
+\texttt{gLinkRefPwr\_dBm} & \texttt{float} & 1 & 是 & 系统配置 & G 链路参考功率 \\
+\texttt{rsrp\_dBm} & \texttt{float} & 1 & 是 & 6.5.5.1 & 测得 RSRP \\
+\texttt{PL\_dB} & \texttt{float *} & 1 & 是 & --- & 输出 $P_L$ \\
+\bottomrule
+\end{longtable}
+
+\subsection{\texttt{slb\_pwr\_calc\_initial}}
+
+输入：\texttt{M}、\texttt{P0\_dBm}、\texttt{PL\_dB}；输出：\texttt{P\_dBm}（式\eqref{eq:power}）。
+
+\subsection{\texttt{slb\_meas\_rsrp}}
+
+输入：各天线训练 RE 线性功率数组、RE 数、天线数；输出：\texttt{rsrp\_linear}（多天线取 max 后天线内线性平均）。
+
+\subsection{\texttt{slb\_meas\_rssi}}
+
+输入：符号 RE 总功率数组；输出：\texttt{rssi\_linear}（多天线 max）。
+
+\subsection{\texttt{slb\_meas\_rsrq} / \texttt{slb\_meas\_sinr}}
+
+输入：同符号 \texttt{rsrp\_linear}、\texttt{rssi\_linear}；输出：比值（线性域计算）。
+
+\subsection{\texttt{slb\_meas\_cbra}}
+
+输入：测量窗口内符号功率序列、DT 前导检测结果、帧长；输出：$\mathrm{CBRA}\in[0,1]$。
+
+\subsection{\texttt{slb\_meas\_pms\_csi}}
+
+输入：测距符号频域 IQ 样本 \texttt{freq\_iq[]}、CSI 模式 \texttt{mode}（1=全帧平均，2=特定测距符号）、天线端口数与子载波数；输出：各子载波 \texttt{iq\_linear[]} 与 \texttt{rpl\_dBm[]}（式\eqref{eq:iqdbm} 联合编码字段）。
+
+\subsection{\texttt{slb\_meas\_pms\_timediff}}
+
+输入：PMS 本地参考时间坐标系下 TOA/TOD 时间戳 \texttt{t[6]}、传输信号数 \texttt{n\_signals}（2 或 3）、本节点角色 \texttt{node\_role}；输出：两信号时为单个 $T$，三信号时为 $T_1,T_2$（定义见 6.5.5.7）。
+
+\subsection{\texttt{slb\_meas\_pms\_aoa}}
+
+输入：PMS 在天线阵列处的接收快照 \texttt{array\_snap[]}；输出：参考坐标系（$Z$ 法线、$X$ 正南、$Y$ 正东）下的水平角 \texttt{azimuth\_deg} 与垂直角 \texttt{elevation\_deg}。
+
+%======================================================================
+\section{处理步骤}
+%======================================================================
+
+\subsection{6.5.4 单业务功率计算}
+
+\begin{enumerate}
+  \item 调用 \texttt{slb\_meas\_rsrp} 得 RSRP（dBm 或转 dBm）；
+  \item \texttt{slb\_pwr\_calc\_pathloss}：$P_L=\texttt{gLinkReferenceSignalPower}-\mathrm{RSRP}$；
+  \item 由业务类型查 $P_o$（对应 NominalConfig IE）；
+  \item $P=10\log_{10}(M)+P_o+P_L$。
+\end{enumerate}
+
+\subsection{6.5.4 多业务同符号限幅}
+
+\begin{enumerate}
+  \item 对 $i=0\ldots N-1$ 分别得 $P_i$（dBm），转线性 $\hat{P}_i$；
+  \item $\hat{P}=\min\{\hat{P}_{\mathrm{MAX}},\sum_i \hat{P}_i\}$；
+  \item 若超限，$\hat{P}_k=\hat{P}/K$ 写入各子载波。
+\end{enumerate}
+
+\subsection{6.5.5.1 RSRP}
+
+\begin{enumerate}
+  \item 定位第一训练信号所在符号与各有效 RE；
+  \item 各 RE 线性功率求平均（天线内）；
+  \item 多天线取 max 作为上报 RSRP。
+\end{enumerate}
+
+\subsection{6.5.5.3/6.5.5.4 RSRQ/SINR}
+
+\begin{enumerate}
+  \item 同符号完成 RSRP 与 RSSI 测量；
+  \item 线性域：$\mathrm{RSRQ}=\mathrm{RSRP}/\mathrm{RSSI}$；
+  \item 线性域：$\mathrm{SINR}=\mathrm{RSRP}/(\mathrm{RSSI}-\mathrm{RSRP})$；
+  \item 多天线分别计算后取 max 上报。
+\end{enumerate}
+
+\subsection{6.5.5.5 CBRA}
+
+\begin{enumerate}
+  \item 在 $T_{\mathrm{measure}}$ 内逐符号/逐段采样功率；
+  \item 若检测 DT 前导且同步序列功率 $>-87\,\dBm$，忙时长 = 前导 + 数据帧；
+  \item 否则单符号功率 $>-62\,\dBm$ 则该符号时长计为忙；
+  \item $\mathrm{CBRA}=T_{\mathrm{busy}}/T_{\mathrm{measure}}$。
+\end{enumerate}
+
+\subsection{6.5.5.6 PMS CSI 编码}
+
+\begin{enumerate}
+  \item 对测距符号到达接收天线连接器的频域样本，按模式 1 全帧平均或模式 2 选取第 $n$ 个测距符号；
+  \item 估计各有效子载波 $k$ 的信道系数，得 \texttt{IQ[linear]}（12\,bit 有符号）；
+  \item 配置各子载波 \texttt{RPL[dBm]} 标尺（12\,bit 有符号）；
+  \item 按式\eqref{eq:iqdbm} 计算 \texttt{IQ[dBm]} 供 6.6 解码与测距解算。
+\end{enumerate}
+
+\subsection{6.5.5.7 PMS 时间差}
+
+\begin{enumerate}
+  \item 在 PMS 本地参考时间坐标系下，记录各 PMS 开端到达发送/接收天线连接器的 TOA/TOD，得 $t_1\ldots t_6$；
+  \item 若 PMS 含多端口/波束分量，按标准规定对分量联合测量（加权平均等）后再填入 $t_i$；
+  \item 两信号：第一节点 $T=t_4-t_1$，第二节点 $T=t_3-t_2$；
+  \item 三信号：第一节点 $T_1=t_4-t_1$、$T_2=t_5-t_4$；第二节点 $T_1=t_3-t_2$、$T_2=t_6-t_3$；
+  \item 输出 $T$ 或 $T_1,T_2$ 供 6.6 RTT 距离解算。
+\end{enumerate}
+
+\subsection{6.5.5.8 PMS AoA}
+
+\begin{enumerate}
+  \item 采集 PMS 在天线阵列各单元上的频域/空域接收快照；
+  \item 采用 MUSIC、ESPRIT 或波束扫描等 DOA 算法估计到达方向；
+  \item 映射至参考坐标系：$Z$ 轴为椭球法线，$X$ 正南，$Y$ 正东；
+  \item 输出水平角（相对 $X$ 轴逆时针，$[0,360)$°）与垂直角（相对 $Z$ 轴，$[0,180]$°）。
+\end{enumerate}
+
+%======================================================================
+\section{状态机与时序}
+%======================================================================
+
+功控与测量无复杂内部状态机，但存在\textbf{测量--功控--发射}依赖链：
+\begin{itemize}[nosep]
+  \item 态 1（空闲/同步）：接收 G 链路训练，缓存频域样本；
+  \item 态 2（测量）：RSRP/RSSI 同符号计算；
+  \item 态 3（功控）：$P_L$ 与 $P$ 计算，可选多业务限幅；
+  \item 态 4（发射）：按 $\hat{P}_k$ 映射 T 符号 RE；
+  \item CBRA 与 PMS 测量可并行于上述流程，由上层触发。
+\end{itemize}
+
+%======================================================================
+\section{协议中允许本模块改变的参数}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{参数} & \textbf{来源} & \textbf{影响} \\
+\midrule
+$P_o$（各 NominalConfig） & XRC/系统消息 & 改变目标接收功率 \\
+\texttt{gLinkReferenceSignalPower} & G 节点配置 & 改变 $P_L$ 基准 \\
+$M$, $N$, $K$ & 调度 & 改变 $P$ 与限幅分配 \\
+$P_{\mathrm{MAX}}$ & 射频/法规/节电 & 改变限幅上限 \\
+测量符号/窗口 & MAC 配置 & 改变 RSRP/RSSI/CBRA 采样 \\
+PMS 模式 1/2 & 6.6 流程 & 改变 CSI 平均/符号级反馈 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{约束与极限条件}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{4.5cm}p{9.5cm}}
+\toprule
+\textbf{约束} & \textbf{处理建议} \\
+\midrule
+RSRP/RSSI 须同符号（RSRQ/SINR） & 不同符号输入返回 \texttt{SLB\_PHY\_ERR\_PARAM} \\
+线性域平均后再转 dB & 禁止对 dBm 直接算术平均 \\
+$\mathrm{RSSI}>\mathrm{RSRP}$（SINR） & 分母 $\leq 0$ 时返回错误或钳位 \\
+$M\geq 1$ & $M{=}0$ 返回 \texttt{SLB\_PHY\_ERR\_PARAM} \\
+功控 RSRP 与 $P_L$ 参考信号一致 & 配置不一致将导致功率偏差 \\
+CBRA DT 分支须解析帧长 & 否则忙时长统计错误 \\
+多天线 max 上报 & 模块内统一实现，避免上层重复 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{链路调用对照表}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llcc}
+\toprule
+\textbf{链路/信息块} & \textbf{标准位置} & \textbf{6.5.4} & \textbf{6.5.5} \\
+\midrule
+SRS（T 符号） & 6.2.3 & $P$（\texttt{srs-P0}） & --- \\
+随机接入（T 符号） & 6.2.4 & $P$（\texttt{rach-P0}） & RSRP（$P_L$） \\
+HARQ-ACK（T 符号） & 6.2.4.10 & $P$（\texttt{ack-P0}） & --- \\
+第一类数据（T 符号） & 6.2.5.2 & $P$（\texttt{data-Class1-P0}） & SINR（MCS） \\
+第二类数据（T 符号） & 6.2.5.3 & $P$（\texttt{data-Class2-P0}） & SINR \\
+同步/训练接收 & 6.2.1/6.2.2 & $P_L$ 输入 & RSRP、RSSI \\
+直通/LBT & --- & --- & CBRA \\
+PMS 测距 & 6.2.3/6.6 & --- & CSI、时间差、AoA \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{测量量关系速查}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lllp{4cm}}
+\toprule
+\textbf{测量量} & \textbf{域} & \textbf{主要依赖} & \textbf{典型用途} \\
+\midrule
+RSRP & 功率 & 第一训练信号 & 路径损耗、功控、选网 \\
+RSSI & 功率 & 整符号 & RSRQ/SINR 分母 \\
+RSRQ & 比 & RSRP/RSSI & 负载下链路质量 \\
+SINR & 比 & RSRP/(RSSI-RSRP) & MCS、调度 \\
+CBRA & 时间占比 & 功率门限 + DT & LBT、信道占用 \\
+PMS CSI & 复信道 & 测距符号 & 测距辅助 \\
+PMS 时间差 & 时间 & TOA/TOD & RTT \\
+AoA & 角度 & 阵列 & 定位 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{API 速查}
+%======================================================================
+
+\begin{lstlisting}[language=C]
+/* 6.5.4 功率控制 */
+int slb_pwr_calc_pathloss(float gLinkRefPwr_dBm, float rsrp_dBm, float *PL_dB);
+int slb_pwr_calc_initial(uint16_t M, float P0_dBm, float PL_dB, float *P_dBm);
+int slb_pwr_aggregate(const float *P_lin, uint8_t N, uint16_t K,
+                      float Pmax_lin, float *Pk_lin);
+
+/* 6.5.5 通信测量量 */
+int slb_meas_rsrp(const slb_meas_rsrp_cfg_t *cfg, float *rsrp_linear);
+int slb_meas_rssi(const slb_meas_rssi_cfg_t *cfg, float *rssi_linear);
+int slb_meas_rsrq(float rsrp_linear, float rssi_linear, float *rsrq);
+int slb_meas_sinr(float rsrp_linear, float rssi_linear, float *sinr);
+int slb_meas_cbra(const slb_meas_cbra_cfg_t *cfg, float *cbra);
+
+/* 6.5.5 位置测量量 */
+int slb_meas_pms_csi(const slb_meas_pms_csi_cfg_t *cfg, slb_pms_csi_t *out);
+int slb_meas_pms_timediff(const slb_pms_time_t *t, slb_pms_timediff_t *out);
+int slb_meas_pms_aoa(const slb_meas_pms_aoa_cfg_t *cfg, slb_pms_aoa_t *out);
+\end{lstlisting}
+
+%======================================================================
+\section{错误码}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\begin{tabular}{cll}
+\toprule
+\textbf{宏} & \textbf{值} & \textbf{含义} \\
+\midrule
+\texttt{SLB\_PHY\_OK} & 0 & 成功 \\
+\texttt{SLB\_PHY\_ERR\_PARAM} & $-1$ & 空指针、$M{=}0$、RSRQ/SINR 分母非法 \\
+\texttt{SLB\_PHY\_ERR\_BUF} & $-2$ & 输出缓冲区不足 \\
+\texttt{SLB\_PHY\_ERR\_MEAS} & $-3$ & 测量样本不足或符号不一致 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{工程集成说明}
+%======================================================================
+
+\subsection{文件结构}
+
+\begin{lstlisting}
+20260625-6.5.4-6.5.5-功率控制与测量量1/
+  slb_phy_pwr_meas.h
+  slb_phy_pwr_meas.c
+  SLB物理层6.5.4-6.5.5功率控制与测量量技术文档.tex
+  SLB_6.5.4-6.5.5_功率控制与测量量_学习资料.tex
+\end{lstlisting}
+
+\subsection{与标准其他章节的衔接}
+
+\begin{itemize}[nosep]
+  \item \textbf{6.2.3}：SRS、PMS 等资源映射——测量与功控的对象；
+  \item \textbf{6.5.5.1}：RSRP 定义——6.5.4 路径损耗的直接输入；
+  \item \textbf{6.6}：使用 6.5.5.6\textasciitilde 6.5.5.8 完成测距解算；
+  \item \textbf{XRC/系统消息}：承载 $P_o$ 与测量触发配置。
+\end{itemize}
+
+\subsection{编译}
+
+\begin{lstlisting}[language=bash]
+cc -std=c99 -Wall -Wextra -c slb_phy_pwr_meas.c -o slb_phy_pwr_meas.o
+cc your_phy_module.c slb_phy_pwr_meas.o -lm -o your_phy_app
+\end{lstlisting}
+
+\vfill
+\begin{center}
+\small\textcolor{gray}{精确参数与字段定义以 T/XS 10001-2025 正式标准为准；本文档仅供 SLB 物理层实现与联调参考。}
+\end{center}
+
+\end{document}
