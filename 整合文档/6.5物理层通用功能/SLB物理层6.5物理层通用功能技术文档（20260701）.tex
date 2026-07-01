@@ -1,0 +1,2459 @@
+% !TEX program = xelatex
+\documentclass[11pt,a4paper]{ctexart}
+
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{longtable}
+
+\geometry{left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm}
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  backgroundcolor=\color{gray!8},
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false
+}
+
+\newcommand{\dBm}{\,\mathrm{dBm}}
+\newcommand{\dB}{\,\mathrm{dB}}
+\newcommand{\NGPID}{N_{\mathrm{G-PID}}}
+
+\title{%
+  \textbf{星闪 SLB 物理层}\\[0.4em]
+  \Large 6.5 物理层通用功能 技术文档\\[0.3em]
+  \large 6.5.1\textasciitilde 6.5.9 完整实现参考\\[0.2em]
+  \normalsize CRC \textbullet\ Gold/QPSK \textbullet\ 功控/测量 \textbullet\ 调制 \textbullet\ 加扰/SC-FDMA/ZC
+}
+\author{依据 T/XS 10001-2025《星闪无线通信系统 接入层\\
+同步低时延宽带空口 SLB 技术要求和测试方法》整理\\
+（团体标准 20250326 版）\\[0.5em]
+代码目录：\texttt{E:\textbackslash 实习\textbackslash AI代码\textbackslash 6.5物理层通用功能}}
+\date{2026年7月1日}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+%======================================================================
+\part{总览}
+%======================================================================
+
+\section{文档范围与模块划分}
+
+本文档整合 SLB 120\,kHz 物理层协议第 \textbf{6.5 节``物理层通用功能''}全部子节（6.5.1\textasciitilde 6.5.9），为工程实现与联调提供统一的算法定义、接口说明与 C 语言参考实现映射。
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{节号} & \textbf{名称} & \textbf{C 模块} & \textbf{核心输出} \\
+\midrule
+6.5.1 & 循环冗余校验 CRC & \texttt{slb\_phy\_common} & 编码/校验比特 \\
+6.5.2 & 伪随机 Gold 序列 & \texttt{slb\_phy\_common} & $c(i)$ \\
+6.5.3 & 伪随机 QPSK 序列 & \texttt{slb\_phy\_common} & 161 点参考符号 \\
+6.5.4 & 功率控制 & \texttt{slb\_phy\_pwr\_meas} & 发射功率 $P$ \\
+6.5.5 & 测量量 & \texttt{slb\_phy\_pwr\_meas} & RSRP/RSSI/RSRQ/SINR/PMS \\
+6.5.6 & 调制方式 & \texttt{slb\_phy\_mod} & $d(i)$ 符号 \\
+6.5.7 & 比特加扰 & \texttt{slb\_phy\_scram} & $\tilde{t}_i$ \\
+6.5.8 & SC-FDMA 波形 & \texttt{slb\_phy\_scfdma} & $y(n)$ \\
+6.5.9 & ZC 序列/组跳 & \texttt{slb\_phy\_zc} & $r_{u,v}^{(\alpha)}(n)$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{PHY 发送/接收流水线}
+
+\begin{itemize}[nosep]
+  \item \textbf{控制信息（6.2.4）}：6.5.1 CRC $\rightarrow$ 6.2.6 极化编码 $\rightarrow$ 6.5.6 QPSK $\rightarrow$ 资源映射；
+  \item \textbf{数据 TB（6.2.5）}：6.5.1 CRC $\rightarrow$ 6.2.6 编码 $\rightarrow$ 6.5.7 加扰 $\rightarrow$ 6.5.6 调制 $\rightarrow$ 6.5.4 功控 $\rightarrow$ 映射；
+  \item \textbf{参考信号（6.2.3）}：6.5.2 Gold $\rightarrow$ 6.5.3 QPSK 或 6.5.9 ZC $\rightarrow$ 映射；
+  \item \textbf{深覆盖（6.3.3）}：6.5.7 加扰 $\rightarrow$ 6.5.6 调制 $\rightarrow$ 6.5.8 SC-FDMA $\rightarrow$ 映射；DMRS 走 6.5.9。
+\end{itemize}
+
+\section{统一错误码}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{cll}
+\toprule
+\textbf{宏} & \textbf{值} & \textbf{含义} \\
+\midrule
+\texttt{SLB\_PHY\_OK} & 0 & 成功 \\
+\texttt{SLB\_PHY\_ERR\_PARAM} & $-1$ & 空指针或非法参数 \\
+\texttt{SLB\_PHY\_ERR\_BUF} & $-2$ & 输出缓冲区不足 \\
+\texttt{SLB\_PHY\_ERR\_MEAS} / \texttt{SLB\_PHY\_ERR\_MODE} & $-3$ & 测量非法或模式错误 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{工程文件结构}
+
+\begin{lstlisting}
+E:/实习/AI代码/6.5物理层通用功能/
+  slb_phy.h                 # 统一入口
+  slb_phy_types.h           # 公共类型
+  slb_phy_common.c/.h       # 6.5.1-6.5.3
+  slb_phy_pwr_meas.c/.h     # 6.5.4-6.5.5
+  slb_phy_mod.c/.h          # 6.5.6
+  slb_phy_scram.c/.h        # 6.5.7
+  slb_phy_scfdma.c/.h       # 6.5.8
+  slb_phy_zc.c/.h           # 6.5.9
+  slb_phy_test.c            # 基础自测
+  Makefile
+\end{lstlisting}
+
+\newpage
+
+%======================================================================
+\part{6.5.1～6.5.3 共性基础算法}
+%======================================================================
+
+%======================================================================
+\section{协议章节对应}
+%======================================================================
+
+本节对应星闪 SLB 接入层物理层协议 T/XS 10001-2025 第 6.5 节``共性基础算法''，具体涵盖：
+\begin{itemize}[nosep]
+  \item \textbf{6.5.1} 循环冗余校验（CRC）——五种多项式（CRC24A/CRC24B/CRC16/CRC8/CRC6）的编码与校验；
+  \item \textbf{6.5.2} 伪随机序列（31 阶 Gold 序列）——基于双 $m$ 序列的 Gold 序列生成；
+  \item \textbf{6.5.3} 伪随机 QPSK 序列——基于 Gold 序列的 161 子载波 QPSK 参考信号生成。
+\end{itemize}
+
+%======================================================================
+\section{功能定义}
+%======================================================================
+
+本模块为 SLB 120\,kHz 物理层中控制信息、参考信号、比特加扰等多条链路提供统一的``底层序列/校验''算法库。6.5.1\textasciitilde 6.5.3 不规定具体业务内容，只规定\textbf{怎么算}这些基础比特/符号序列。
+
+SAB、HARQ-ACK、CQI、GCI、数据 TB 等差错检测均依赖 CRC（6.5.1）；SRS、CSI-RS、DMRS、PAS、T 链路 ACK 序列传输等均依赖 Gold 序列（6.5.2）与 QPSK 序列（6.5.3）。
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lllll}
+\toprule
+\textbf{节号} & \textbf{名称} & \textbf{输入} & \textbf{输出} & \textbf{典型链路用途} \\
+\midrule
+6.5.1 & 循环冗余校验 CRC & $A$ 个信息比特 $+ g(D)$ & $B{=}A{+}L$ 个比特 & SAB、HARQ-ACK、CQI、GCI、数据 TB \\
+6.5.2 & 伪随机 Gold 序列 & $c_{\mathrm{init}}$, $M_{\mathrm{PN}}$ & $c(0)\ldots c(M_{\mathrm{PN}}{-}1)$ & 6.5.3、6.5.7 加扰、6.5.9.1 \\
+6.5.3 & 伪随机 QPSK 序列 & $n,l,N_{\mathrm{ID}},N_{\mathrm{CP}}$ & $r_{n,l}(0)\ldots r_{n,l}(160)$ & SRS、CSI-RS、DMRS、PAS、ACK \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{模块边界（上下游及职责划分）}
+%======================================================================
+
+\subsection{上游模块（输入来源）}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{4.2cm}p{4.5cm}p{5.5cm}}
+\toprule
+\textbf{上游模块} & \textbf{输入给本模块的内容} & \textbf{说明} \\
+\midrule
+控制信息组装（6.2.4） & $a_0\ldots a_{A-1}$ & 按 LSB$\rightarrow$MSB 组装，含预留位 \\
+数据 TB 处理（6.2.5） & 传输块信息比特 $+$ 分段参数 & $A$ 随 TB 大小变化 \\
+帧配置/调度模块 & CRC 类型、$c_{\mathrm{init}}$ 参数、$M_{\mathrm{PN}}$ & 决定多项式与 Gold 参数 \\
+高层 ID 配置 & Phy-ID 掩码（24 bit） & 仅 $L{=}24$ 的 CRC 掩码 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{下游模块（输出去向）}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{4.2cm}p{4.5cm}p{5.5cm}}
+\toprule
+\textbf{下游模块} & \textbf{本模块输出} & \textbf{说明} \\
+\midrule
+极化编码（6.2.6） & $b_0\ldots b_{B-1}$ & 控制信息链路 \\
+比特加扰（6.5.7） & Gold 序列 $c(i)$ & 与数据比特逐位模 2 加 \\
+资源映射（6.2.3） & QPSK 符号 $r_{n,l}(k)$ & 161 子载波，$k{=}80$ 置零 \\
+序列组跳（6.5.9.1） & Gold 序列 $c(i)$ & $c_{\mathrm{init}}=\lfloor n_{\mathrm{ID}}^X/30\rfloor$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{本模块不负责的内容}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{5.5cm}p{8.5cm}}
+\toprule
+\textbf{不负责内容} & \textbf{原因} \\
+\midrule
+具体业务语义 & 6.5.1\textasciitilde 6.5.3 只定义算法 \\
+信道编码（极化码/LDPC） & 由 6.2.6 负责 \\
+资源映射与时频分配 & 由 6.2.3 负责 \\
+纠错或重传决策 & CRC 仅检测，HARQ 由上层负责 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{在 SLB 通信流程中的角色}
+%======================================================================
+
+\begin{itemize}
+  \item \textbf{控制信息链路（6.2.4）}：6.5.1 CRC $\rightarrow$ 6.2.6 极化编码；
+  \item \textbf{参考信号链路（6.2.3）}：6.5.2 Gold $\rightarrow$ 6.5.3 QPSK $\rightarrow$ 资源网格；
+  \item \textbf{数据链路（6.2.5/6.5.7）}：6.5.1 TB 级 CRC $+$ 6.5.2 比特加扰。
+\end{itemize}
+
+\textbf{推荐复用策略}：工程上只维护一份 \texttt{slb\_phy\_common} 库；各链路模块仅传入不同的 $A$、$g(D)$、$c_{\mathrm{init}}$ 或 $N_{\mathrm{ID}}$ 等参数。
+
+%======================================================================
+\section{强制要求与关键参数}
+%======================================================================
+
+\subsection{6.5.1 循环冗余校验（CRC）}
+
+\textbf{强制规则：}
+\begin{itemize}[nosep]
+  \item GF(2) 整除：$T(D)$ 能被所选 $g(D)$ 整除；
+  \item 系统码：$b_k=a_k$（$k{=}0\ldots A{-}1$），$b_k=p_{k-A}$（$k{=}A\ldots A{+}L{-}1$）；
+  \item 带掩码（仅 $L{=}24$）：$b_k=(p_{k-A}+x_{\mathrm{MASK},k-A})\bmod 2$；
+  \item 比特顺序：下标 0 对应 LSB 字段先组装；预留位恒为 0 也参与计算。
+\end{itemize}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{枚举} & \textbf{生成多项式 $g(D)$} & \textbf{$L$} & \textbf{120\,kHz 典型用途} \\
+\midrule
+\texttt{SLB\_CRC24A} & $D^{24}{+}D^{23}{+}D^{18}{+}D^{17}{+}D^{14}{+}D^{11}{+}D^{10}{+}D^{7}{+}D^{6}{+}D^{5}{+}D^{4}{+}D^{3}{+}D{+}1$ & 24 & 第二类数据 TB \\
+\texttt{SLB\_CRC24B} & $D^{24}{+}D^{23}{+}D^{21}{+}D^{20}{+}D^{17}{+}D^{15}{+}D^{13}{+}D^{12}{+}D^{8}{+}D^{4}{+}D^{2}{+}D{+}1$ & 24 & SAB、HARQ-ACK、GCI \\
+\texttt{SLB\_CRC16} & $D^{16}{+}D^{12}{+}D^{5}{+}1$ & 16 & CQI、调度请求 SR \\
+\texttt{SLB\_CRC8} & $D^{8}{+}D^{6}{+}D^{5}{+}D^{3}{+}1$ & 8 & 第一类数据可选 \\
+\texttt{SLB\_CRC6} & $D^{6}{+}D^{5}{+}1$ & 6 & 特殊短控制信息 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{6.5.2 伪随机 Gold 序列}
+
+\begin{align}
+c(i) &= \bigl(x_1(i{+}1600) + x_2(i{+}1600)\bigr) \bmod 2 \\
+x_1(i{+}31) &= \bigl(x_1(i{+}3) + x_1(i)\bigr) \bmod 2 \\
+x_2(i{+}31) &= \bigl(x_2(i{+}3) + x_2(i{+}2) + x_2(i{+}1) + x_2(i)\bigr) \bmod 2
+\end{align}
+
+初始化：$x_1(0){=}1$，$x_1(i){=}0$（$i{=}1\ldots 30$）；$c_{\mathrm{init}}=\sum_{i=0}^{30} x_2(i)\cdot 2^i$。
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{场景} & \textbf{标准节} & \textbf{$c_{\mathrm{init}}$ 公式} \\
+\midrule
+伪随机 QPSK 参考信号 & 6.5.3 & $2^{10}(15(n{+}1){+}l{+}1)(4N_{\mathrm{ID}}{+}1){+}4N_{\mathrm{ID}}{+}N_{\mathrm{CP}}$ \\
+比特加扰 & 6.5.7 & $n_f\cdot 2^{24} + N_{\mathrm{G-PID}}$ \\
+ZC 序列组跳 & 6.5.9.1 & $\lfloor n_{\mathrm{ID}}^X / 30\rfloor$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{6.5.3 伪随机 QPSK 序列}
+
+\begin{equation}
+r_{n,l}(m) = \frac{1}{\sqrt{2}}\bigl(2c(2m)-1\bigr) + j\,\frac{1}{\sqrt{2}}\bigl(2c(2m{+}1)-1\bigr), \quad m=0,\ldots,160
+\end{equation}
+
+所需 Gold 长度 $M_{\mathrm{PN}}=322$；DC 子载波 $k{=}80$ 置零。
+
+$c_{\mathrm{init}}$ 由 $n$、$l$、$N_{\mathrm{ID}}$、$N_{\mathrm{CP}}$ 共同决定，各参数含义与取值如下：
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{2.5cm}p{4.5cm}p{7cm}}
+\toprule
+\textbf{参数} & \textbf{含义} & \textbf{取值范围} \\
+\midrule
+$n$ & 超帧内无线帧号 & $n = 0, 1, \ldots, 7$ \\
+$N_{\mathrm{ID}}$ & G 节点标识低 8 位 & $0, 1, \ldots, 255$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+通信域 CP-OFDM 符号类型与符号编号 $l$、循环前缀类型 $N_{\mathrm{CP}}$ 的对应关系：
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{4.8cm}p{3.8cm}p{1.8cm}p{3.6cm}}
+\toprule
+\textbf{CP-OFDM 符号类型} & \textbf{符号编号 $l$} & \textbf{$N_{\mathrm{CP}}$} & \textbf{说明} \\
+\midrule
+类型一 A 或类型一 B & $l = 0, 1, \ldots, 13$ & 3 & 每无线帧 14 个符号 \\
+类型二 & $l = 0, 1, \ldots, 12$ & 2 & 每无线帧 13 个符号 \\
+类型三 & $l = 0, 1, \ldots, 11$ & 1 & 每无线帧 12 个符号 \\
+类型四 & $l = 0, 1, \ldots, 9$ & 0 & 每无线帧 10 个符号 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+$N_{\mathrm{CP}} \in \{0, 1, 2, 3\}$ 表示通信域使用的循环前缀类型；$N_{\mathrm{CP}}{=}3$ 对应类型一 A/B，$N_{\mathrm{CP}}{=}2$ 对应类型二，$N_{\mathrm{CP}}{=}1$ 对应类型三，$N_{\mathrm{CP}}{=}0$ 对应类型四。
+
+\textbf{标准算例}（$n{=}0,l{=}0,N_{\mathrm{ID}}{=}5,N_{\mathrm{CP}}{=}3$）：
+$c_{\mathrm{init}}=344087$，$c(0\ldots 4)=0,1,1,1,0$。
+
+%======================================================================
+\section{数据类型、长度/维度}
+%======================================================================
+
+\subsection{6.5.1 CRC 编码接口 \texttt{slb\_crc\_encode}}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lllll}
+\toprule
+\textbf{变量} & \textbf{方向} & \textbf{类型} & \textbf{长度} & \textbf{说明} \\
+\midrule
+\texttt{a} & 输入 & \texttt{const uint8\_t *} & $A$ bit & 信息比特，每元素 0/1 \\
+\texttt{A} & 输入 & \texttt{uint32\_t} & 1 & 信息比特个数 \\
+\texttt{poly} & 输入 & \texttt{slb\_crc\_poly\_t} & 1 & CRC 多项式选择 \\
+\texttt{mask} & 输入 & \texttt{const uint8\_t *} 或 \texttt{NULL} & 24 bit & 掩码；\texttt{NULL} 表示不加 \\
+\texttt{b} & 输出 & \texttt{uint8\_t *} & $A{+}L$ bit & 编码比特 $b_0\ldots b_{B-1}$ \\
+\texttt{b\_cap} & 输入 & \texttt{uint32\_t} & 1 & 缓冲区容量 $\geq A{+}L$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{6.5.2 Gold 序列接口 \texttt{slb\_pn\_gold\_generate}}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{变量} & \textbf{方向} & \textbf{类型} & \textbf{含义} \\
+\midrule
+\texttt{c\_init} & 输入 & \texttt{uint32\_t} & Gold 初始化整数 \\
+\texttt{M\_PN} & 输入 & \texttt{uint32\_t} & 所需序列长度 \\
+\texttt{c} & 输出 & \texttt{uint8\_t *} & $c(0)\ldots c(M_{\mathrm{PN}}{-}1)$ \\
+\texttt{c\_cap} & 输入 & \texttt{uint32\_t} & 容量 $\geq M_{\mathrm{PN}}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{6.5.3 QPSK 接口}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{变量} & \textbf{方向} & \textbf{类型} & \textbf{含义} \\
+\midrule
+\texttt{param.n} & 输入 & \texttt{uint8\_t} & 无线帧号 $n{=}0\ldots 7$ \\
+\texttt{param.l} & 输入 & \texttt{uint8\_t} & 符号号 $l$，见 CP-OFDM 类型表 \\
+\texttt{param.N\_ID} & 输入 & \texttt{uint8\_t} & G 节点标识低 8 位 \\
+\texttt{param.N\_CP} & 输入 & \texttt{uint8\_t} & CP 类型 $0\ldots 3$ \\
+\texttt{r} & 输出 & \texttt{slb\_cpx\_f32\_t *} & 161 个 QPSK 符号 \\
+\texttt{r\_cap} & 输入 & \texttt{uint32\_t} & $\geq 161$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{时序关系}
+%======================================================================
+
+\begin{itemize}[nosep]
+  \item \textbf{工作模式}：函数调用模式，无持续流式状态；
+  \item \textbf{无状态约束}：无静态全局变量，可重入、可多线程；
+  \item \textbf{实时性}：Gold 需迭代 $M_{\mathrm{PN}}{+}1600$ 次 LFSR，建议帧起始前预计算；CRC 为 $O(A)$。
+\end{itemize}
+
+%======================================================================
+\section{接口表格（明确的输入/输出）}
+%======================================================================
+
+\subsection{\texttt{slb\_crc\_encode}}
+
+\begin{longtable}{p{2.2cm}p{2.8cm}p{1.2cm}p{1.5cm}p{2.2cm}p{4.5cm}}
+\toprule
+\textbf{参数} & \textbf{类型} & \textbf{长度} & \textbf{必需} & \textbf{来源} & \textbf{说明} \\
+\midrule
+\endhead
+\texttt{a} & \texttt{const uint8\_t *} & $A$ & 是 & 信息组装 & 信息比特 0/1 \\
+\texttt{A} & \texttt{uint32\_t} & 1 & 是 & 上游 & 信息比特数 \\
+\texttt{poly} & \texttt{slb\_crc\_poly\_t} & 1 & 是 & 协议配置 & CRC 类型 \\
+\texttt{mask} & \texttt{const uint8\_t *} & 24 & 条件 & 高层 ID & 24 bit 掩码 \\
+\texttt{b} & \texttt{uint8\_t *} & $A{+}L$ & 是 & 调用方 & 输出缓冲 \\
+\texttt{b\_cap} & \texttt{uint32\_t} & 1 & 是 & 调用方 & $\geq A{+}L$ \\
+\bottomrule
+\end{longtable}
+
+\subsection{\texttt{slb\_crc\_check}}
+
+输入：\texttt{b}（$B$ bit）、\texttt{poly}、\texttt{mask}；输出：\texttt{pass}（1=通过，0=失败）。
+
+\subsection{\texttt{slb\_pn\_gold\_generate}}
+
+输入：\texttt{c\_init}、\texttt{M\_PN}、\texttt{c\_cap}；输出：\texttt{c[0..M\_PN-1]}。
+
+\subsection{\texttt{slb\_qpsk\_calc\_cinit} / \texttt{slb\_qpsk\_ref\_generate} / \texttt{slb\_qpsk\_map\_to\_re}}
+
+分别计算 $c_{\mathrm{init}}$、生成 161 点 QPSK 序列、映射单个子载波 RE（$k{=}80$ 时输出 $(0,0)$）。
+
+%======================================================================
+\section{处理步骤}
+%======================================================================
+
+\subsection{6.5.1 CRC 编码（以 CRC24B 为例）}
+
+\begin{enumerate}
+  \item 参数校验：空指针、\texttt{b\_cap} $< A{+}L$ 返回错误；
+  \item 初始化 CRC 寄存器为 0；
+  \item 逐 bit 移入 $a_0\ldots a_{A-1}$，按 $g(D)$ 抽头模 2 反馈；
+  \item 提取 $L$ 位校验比特 $p_0\ldots p_{L-1}$；
+  \item 若 \texttt{mask}$\neq$\texttt{NULL}：$b_{A+i}=(p_i+\mathrm{mask}_i)\bmod 2$；否则 $b_{A+i}=p_i$。
+\end{enumerate}
+
+\subsection{6.5.2 Gold 序列生成}
+
+\begin{enumerate}
+  \item 初始化 $x_1$：$x_1(0){=}1$，其余为 0；
+  \item 由 $c_{\mathrm{init}}$ 初始化 $x_2(0\ldots 30)$；
+  \item LFSR 递推至 $i=M_{\mathrm{PN}}{+}1600{-}1$；
+  \item $c(i)=(x_1(i{+}1600)+x_2(i{+}1600))\bmod 2$。
+\end{enumerate}
+
+\subsection{6.5.3 QPSK 参考信号生成}
+
+\begin{enumerate}
+  \item 计算 $c_{\mathrm{init}}$；
+  \item 调用 \texttt{slb\_pn\_gold\_generate}（$M_{\mathrm{PN}}{=}322$）；
+  \item 对 $m{=}0\ldots 160$ 做 QPSK 映射；
+  \item 资源映射：$k{\neq}80$ 时 $a_{k,l}=r_{n,l}(k)$，$k{=}80$ 置零。
+\end{enumerate}
+
+%======================================================================
+\section{状态机与时序}
+%======================================================================
+
+本模块为纯函数库，无内部状态机。建议时序：
+\begin{itemize}[nosep]
+  \item CRC：信息比特组装后、信道编码前；
+  \item Gold：帧配置确定后预计算；
+  \item QPSK：每符号 $l$ 单独生成。
+\end{itemize}
+
+%======================================================================
+\section{协议中允许本模块改变的参数}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{参数} & \textbf{来源} & \textbf{影响} \\
+\midrule
+\texttt{poly} & 帧类型/信令 & 决定 $L$ 与 $g(D)$ \\
+\texttt{A} & 上游输入 & 改变 $B{=}A{+}L$ \\
+\texttt{mask} & 高层 ID & 仅 $L{=}24$，改变校验位 \\
+\texttt{c\_init}, \texttt{M\_PN} & 调度/ID 配置 & 改变 Gold/QPSK 序列 \\
+\texttt{n,l,N\_ID,N\_CP} & 帧/CP 配置 & 改变 QPSK $c_{\mathrm{init}}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{约束与极限条件}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{4.5cm}p{9.5cm}}
+\toprule
+\textbf{约束} & \textbf{处理建议} \\
+\midrule
+CRC 多项式必须合法 & 非法 \texttt{poly} 返回 \texttt{SLB\_PHY\_ERR\_PARAM} \\
+\texttt{b\_cap} $\geq A{+}L$ & 不足返回 \texttt{SLB\_PHY\_ERR\_BUF} \\
+Gold 1600 偏移必须执行 & 不可从 $i{=}0$ 简化为无偏移 \\
+QPSK DC（$k{=}80$）置零 & 由 \texttt{slb\_qpsk\_map\_to\_re} 处理 \\
+线程安全 & 无全局可变状态，输出缓冲由调用方提供 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{链路调用对照表}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llccc}
+\toprule
+\textbf{链路/信息块} & \textbf{标准位置} & \textbf{6.5.1} & \textbf{6.5.2} & \textbf{6.5.3} \\
+\midrule
+通信域 SAB & 6.2.4.1.1 & CRC24B & --- & --- \\
+HARQ-ACK / GCI & 6.2.4.10 & CRC24B+掩码 & --- & --- \\
+CQI / SR & 6.2.4.10.3/4 & CRC16 & --- & --- \\
+第二类数据 TB & 6.2.5.3 & CRC24A & --- & --- \\
+第一类数据 & 6.2.5.2.2 & CRC24A/16/8 & 6.5.7 & --- \\
+SRS / CSI-RS / DMRS & 6.2.3 & --- & $c(i)$ & $r_{n,l}(k)$ \\
+极化码块分段 CRC & 6.2.6.1.1 & CRC24B & --- & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{API 速查}
+%======================================================================
+
+\begin{lstlisting}[language=C]
+/* 6.5.1 */
+uint32_t slb_crc_get_len(slb_crc_poly_t poly);
+int slb_crc_encode(const slb_crc_encode_t *cfg);
+int slb_crc_check(const slb_crc_check_t *cfg);
+
+/* 6.5.2 */
+int slb_pn_gold_generate(const slb_pn_seq_t *cfg);
+
+/* 6.5.3 */
+uint32_t slb_qpsk_calc_cinit(const slb_qpsk_cinit_param_t *param);
+int slb_qpsk_ref_generate(const slb_qpsk_seq_t *cfg);
+int slb_qpsk_map_to_re(const slb_cpx_f32_t *r, slb_cpx_f32_t *a_kl, uint32_t k);
+\end{lstlisting}
+
+%======================================================================
+\section{错误码}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\begin{tabular}{cll}
+\toprule
+\textbf{宏} & \textbf{值} & \textbf{含义} \\
+\midrule
+\texttt{SLB\_PHY\_OK} & 0 & 成功 \\
+\texttt{SLB\_PHY\_ERR\_PARAM} & $-1$ & 空指针或非法参数 \\
+\texttt{SLB\_PHY\_ERR\_BUF} & $-2$ & 输出缓冲区容量不足 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{工程集成说明}
+%======================================================================
+
+\subsection{文件结构}
+
+\begin{lstlisting}
+20260623-6.5.1-6.5.3-CRC与伪随机序列/
+  slb_phy_common.h
+  slb_phy_common.c
+  slb_phy_common_test.c
+  SLB物理层6.5.1-6.5.3共性基础算法技术文档.tex
+\end{lstlisting}
+
+\subsection{编译}
+
+\begin{lstlisting}[language=bash]
+cc -std=c99 -Wall -Wextra -c slb_phy_common.c -o slb_phy_common.o
+cc your_phy_module.c slb_phy_common.o -o your_phy_app
+cc -std=c99 slb_phy_common.c slb_phy_common_test.c -o slb_phy_common_test
+./slb_phy_common_test
+\end{lstlisting}
+
+\vfill
+\begin{center}
+\small\textcolor{gray}{精确参数与字段定义以 T/XS 10001-2025 正式标准为准；本文档仅供 SLB 物理层实现与联调参考。}
+\end{center}
+\newpage
+
+%======================================================================
+\part{6.5.4～6.5.5 功率控制与测量量}
+%======================================================================
+
+%======================================================================
+\section{协议章节对应}
+%======================================================================
+
+本节对应星闪 SLB 接入层物理层协议 T/XS 10001-2025 第 6.5 节``共性基础算法''中功率控制与测量量子节，具体涵盖：
+\begin{itemize}[nosep]
+  \item \textbf{6.5.4} 功率控制——T 节点在 T 符号上发射 SRS、DMRS、PAS、接入、ACK、第一类/第二类数据等信号时的初始总功率计算、多信号功率汇总与 $P_{\mathrm{MAX}}$ 限幅；
+  \item \textbf{6.5.5} 测量量——G/T 节点对同步参考信号、整符号接收能量、信道占用及位置测量信号（PMS）的量化定义，含 RSRP、RSSI、RSRQ、SINR、CBRA、PMS CSI、时间差与 AoA。
+\end{itemize}
+
+%======================================================================
+\section{功能定义}
+%======================================================================
+
+本模块为 SLB 120\,kHz 物理层中 T 链路发射功率决策与各类链路/位置测量提供统一算法库。6.5.4\textasciitilde 6.5.5 不规定具体调度策略或上报流程，只规定\textbf{怎么算}发射功率与测量量。
+
+T 节点 SRS、接入、ACK、数据等业务在 T 符号上的发射功率均依赖 6.5.4 开环功控；路径损耗 $P_L$ 由 6.5.5.1 RSRP 与 G 链路参考功率差值得到。G/T 节点的链路自适应、接入判决、LBT/CBRA 及 6.6 测距流程均依赖 6.5.5 各测量量。
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lllll}
+\toprule
+\textbf{节号} & \textbf{名称} & \textbf{输入} & \textbf{输出} & \textbf{典型链路用途} \\
+\midrule
+6.5.4 & 功率控制 & $M,P_o,P_L$ 或 RSRP 等 & $P$（dBm）/ 限幅后每子载波功率 & T 符号 SRS/接入/ACK/数据发射 \\
+6.5.5.1 & RSRP & 第一训练信号 RE 功率 & 线性平均功率（W/dBm） & 路径损耗、选网、RSRQ/SINR 分子 \\
+6.5.5.2 & RSSI & 整 CP-OFDM 符号总接收功率 & 线性平均功率 & RSRQ/SINR 分母、CBRA 辅助 \\
+6.5.5.3 & RSRQ & RSRP、RSSI（同符号） & 无量纲比 & 负载感知下的链路质量 \\
+6.5.5.4 & SINR & RSRP、RSSI（同符号） & 无量纲比 & MCS、调度、HARQ \\
+6.5.5.5 & CBRA & 符号/帧内功率 + DT 解析 & 时间占比 $T_{\mathrm{busy}}/T_{\mathrm{measure}}$ & LBT、直通竞争、信道占用 \\
+6.5.5.6 & PMS CSI & 测距符号频域接收 & IQ[linear] + RPL & RTT 测距、NLOS 识别 \\
+6.5.5.7 & PMS 时间差 & TOA/TOD 时间戳 & $T$ 或 $T_1,T_2$ & 6.6 双向测距 \\
+6.5.5.8 & PMS AoA & 阵列接收特征 & 水平角、垂直角 & 定位、感知 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{模块边界（上下游及职责划分）}
+%======================================================================
+
+\subsection{上游模块（输入来源）}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{4.2cm}p{4.5cm}p{5.5cm}}
+\toprule
+\textbf{上游模块} & \textbf{输入给本模块的内容} & \textbf{说明} \\
+\midrule
+XRC/系统消息解析 & 各业务 $P_o$（Nominal 配置 IE） & \texttt{srs/rach/ack/data-Class1/2-P0-NominalConfig} \\
+G 链路配置 & \texttt{gLinkReferenceSignalPower} & G 链路参考信号已知功率（dBm） \\
+同步/训练信号接收（6.2） & 第一训练信号频域样本 & RSRP/RSSI 测量对象 \\
+帧调度模块 & $M$（子载波数）、$N$（同符号业务数）、$K$（符号总子载波数） & 功控与限幅参数 \\
+射频能力/法规配置 & $P_{\mathrm{MAX}}$（$\hat{P}_{\mathrm{MAX}}$ 线性域） & T 节点最大发射功率 \\
+PMS 接收处理（6.2.3/6.6） & 测距符号 IQ、TOA/TOD 时间戳、阵列数据 & 位置类测量量 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{下游模块（输出去向）}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{4.2cm}p{4.5cm}p{5.5cm}}
+\toprule
+\textbf{下游模块} & \textbf{本模块输出} & \textbf{说明} \\
+\midrule
+T 链路发射机/功放 & 每 T 符号/子载波发射功率 & 6.5.4 限幅后 $\hat{P}_k$ \\
+6.5.4 路径损耗计算 & RSRP & $P_L=\texttt{gLinkReferenceSignalPower}-\mathrm{RSRP}$ \\
+MAC/RRC 测量上报 & RSRP/RSSI/RSRQ/SINR/CBRA & 链路自适应、切换、LBT 决策 \\
+6.6 位置测量流程 & PMS CSI、时间差 $T$、AoA & RTT 距离解算、定位融合 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{本模块不负责的内容}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{5.5cm}p{8.5cm}}
+\toprule
+\textbf{不负责内容} & \textbf{原因} \\
+\midrule
+闭环 TPC 累积修正 & 标准 6.5.4 为开环功控，无 TPC 命令累积项 \\
+$P_o$ 与参考功率的配置下发 & 由 XRC/系统消息/RRC 负责 \\
+测量触发与上报周期 & 由 MAC/RRC 负责 \\
+PMS 信号生成与资源映射 & 由 6.2.3 与 6.6 负责 \\
+RTT 距离最终解算 & 6.5.5.7 仅定义时间差，解算在 6.6 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{在 SLB 通信流程中的角色}
+%======================================================================
+
+\begin{itemize}
+  \item \textbf{T 链路发射（6.2.3/6.2.4/6.2.5）}：6.5.5.1 测 RSRP $\rightarrow$ 6.5.4 算 $P_L$ 与 $P$ $\rightarrow$ 发射机按功率映射 RE；
+  \item \textbf{链路质量评估}：6.5.5.1\textasciitilde 6.5.5.4 同符号测量 $\rightarrow$ RSRQ/SINR $\rightarrow$ MCS/调度；
+  \item \textbf{信道占用感知}：6.5.5.5 CBRA $\rightarrow$ LBT/直通资源竞争；
+  \item \textbf{位置服务（6.6）}：6.5.5.6\textasciitilde 6.5.5.8 $\rightarrow$ RTT/AoA 融合测距。
+\end{itemize}
+
+\textbf{推荐复用策略}：工程上维护一份 \texttt{slb\_phy\_pwr\_meas} 库；功控模块传入业务类型与 $M$；测量模块按测量类型传入频域/时域样本；多天线场景在模块内统一取 max 规则。
+
+%======================================================================
+\section{强制要求与关键参数}
+%======================================================================
+
+\subsection{6.5.4 功率控制}
+
+\textbf{适用范围}：T 节点在 T 符号上发送 SRS、DMRS、PAS、接入信息、ACK、第一类/第二类数据及其配套参考信号时适用。
+
+\textbf{单信号/信息初始总功率}（对数域）：
+\begin{equation}
+P = 10\log_{10}(M) + P_o + P_L
+\label{eq:power}
+\end{equation}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llp{7cm}}
+\toprule
+\textbf{符号} & \textbf{单位} & \textbf{含义} \\
+\midrule
+$P$ & dBm & 该 T 符号、相应子载波集合上的初始总功率 \\
+$M$ & 无量纲 & 本次发送占用的子载波个数 \\
+$P_o$ & dBm & 该信号/信息的目标接收功率（G 节点配置） \\
+$P_L$ & dB & 路径损耗 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{路径损耗}：
+\begin{equation}
+P_L = \texttt{gLinkReferenceSignalPower} - \mathrm{RSRP}
+\label{eq:pl}
+\end{equation}
+
+\textbf{各业务 $P_o$ 配置 IE}：
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{ll}
+\toprule
+\textbf{业务类型} & \textbf{配置参数名} \\
+\midrule
+信道探测信号（SRS） & \texttt{srs-P0-NominalConfig} \\
+接入信息及其 DMRS、PAS & \texttt{rach-P0-NominalConfig} \\
+ACK 反馈及其 DMRS & \texttt{ack-P0-NominalConfig} \\
+第一类数据及其 DMRS、PAS & \texttt{data-Class1-P0-NominalConfig} \\
+第二类数据及其 DMRS、PAS & \texttt{data-Class2-P0-NominalConfig} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{多信号同 T 符号功率汇总与限幅}：对 $N$ 个信号/信息，先分别得线性域 $\hat{P}_i$，再
+\begin{equation}
+\hat{P} = \min\left\{\hat{P}_{\mathrm{MAX}},\; \sum_{i=0}^{N-1} \hat{P}_i \right\}
+\end{equation}
+超限时符号共 $K$ 个子载波均分：$\hat{P}_k = \hat{P}_{\mathrm{MAX}}/K$。
+
+\textbf{标准算例}：$\texttt{gLinkReferenceSignalPower}=-10\,\dBm$，$\mathrm{RSRP}=-70\,\dBm$，则 $P_L=60\,\dB$；ACK 的 $P_o=-100\,\dBm$，$M=12$，则 $P\approx 10.79-100+60=-29.2\,\dBm$。
+
+\subsection{6.5.5.1 同步参考信号接收功率（RSRP）}
+
+RSRP 为 T 节点在\textbf{第一训练信号所在符号}上，对\textbf{第一训练信号}各有效子载波接收功率（W）取\textbf{线性平均}。多天线取各天线测量值的\textbf{最大值}上报。
+
+\subsection{6.5.5.2 接收信号能量指示（RSSI）}
+
+RSSI 为一个 CP-OFDM 符号时长内，\textbf{整符号}总接收功率（W）在各有效子载波上的线性平均。含同频干扰、邻频泄漏与热噪声。多天线取 max。
+
+\subsection{6.5.5.3 同步参考信号接收质量（RSRQ）}
+
+\begin{equation}
+\mathrm{RSRQ} = \frac{\mathrm{RSRP}}{\mathrm{RSSI}}
+\end{equation}
+RSRP 与 RSSI 须\textbf{同一测量符号}；多天线取 max。
+
+\subsection{6.5.5.4 同步信号信干扰比（SINR）}
+
+\begin{equation}
+\mathrm{SINR} = \frac{\mathrm{RSRP}}{\mathrm{RSSI} - \mathrm{RSRP}}
+\end{equation}
+同符号测量；$\mathrm{RSSI}-\mathrm{RSRP}\approx I+N$；多天线取 max。
+
+\subsection{6.5.5.5 信道忙占比（CBRA）}
+
+\begin{equation}
+\mathrm{CBRA} = \frac{T_{\mathrm{busy}}}{T_{\mathrm{measure}}}
+\end{equation}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{场景} & \textbf{判定依据} & \textbf{门限} \\
+\midrule
+检测到 DT 前导 & 第一组同步序列符号功率线性均值 & $-87\,\dBm$ \\
+未检测到 DT 前导 & 单 CP-OFDM 符号总接收功率线性均值 & $-62\,\dBm$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+检测到 DT 前导时，在前导 + 数据帧整个持续时间内视为忙。
+
+\subsection{6.5.5.6 位置测量信号 CSI（PMS CSI）}
+
+频域模型 $\mathbf{y}_k = \mathbf{H}_k \mathbf{x}_k + \mathbf{n}$；CSI 为到达接收天线连接器处的信道系数估计。
+
+\textbf{IQ 联合编码}：
+\begin{equation}
+\mathrm{IQ[\dBm]} = 20\log_{10}\!\left(\frac{|\mathrm{IQ[linear]}|}{1024}\right) + \mathrm{RPL[\dBm]}
+\label{eq:iqdbm}
+\end{equation}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llp{6cm}}
+\toprule
+\textbf{字段} & \textbf{位宽} & \textbf{含义} \\
+\midrule
+IQ[linear] & 12 bit 有符号 & 相对线性幅度 \\
+RPL[dBm] & 12 bit 有符号 & 相对参考功率 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{两种模式}：模式 1——全测距帧内算术平均；模式 2——按第 $n$ 个测距符号在各跳频信道反馈。
+
+\subsection{6.5.5.7 位置测量信号时间差}
+
+\textbf{双向两信号}：$t_1$（TOD 第一 PMS 发送）、$t_2$（TOA 第一 PMS 接收）、$t_3$（TOD 第二 PMS 发送）、$t_4$（TOA 第二 PMS 接收）。第一位置节点 $T=t_4-t_1$；第二位置节点 $T=t_3-t_2$。
+
+\textbf{双向三信号}：额外 $t_5$（TOD 第三 PMS 发送）、$t_6$（TOA 第二 PMS 接收）。第一节点 $T_1=t_4-t_1$，$T_2=t_5-t_4$；第二节点 $T_1=t_3-t_2$，$T_2=t_6-t_3$。
+
+\subsection{6.5.5.8 位置测量信号到达角度（AoA）}
+
+参考坐标系：$Z$ 轴为椭球法线；$X$ 正南；$Y$ 正东。水平角相对 $X$ 轴逆时针 $[0,360)$ 度；垂直角相对 $Z$ 轴 $[0,180]$ 度。
+
+%======================================================================
+\section{数据类型、长度/维度}
+%======================================================================
+
+\subsection{6.5.4 功率控制接口 \texttt{slb\_pwr\_calc\_initial}}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lllll}
+\toprule
+\textbf{变量} & \textbf{方向} & \textbf{类型} & \textbf{长度} & \textbf{说明} \\
+\midrule
+\texttt{M} & 输入 & \texttt{uint16\_t} & 1 & 占用子载波数 \\
+\texttt{P0\_dBm} & 输入 & \texttt{float} & 1 & 目标接收功率 $P_o$ \\
+\texttt{PL\_dB} & 输入 & \texttt{float} & 1 & 路径损耗 $P_L$ \\
+\texttt{P\_dBm} & 输出 & \texttt{float *} & 1 & 初始总功率 $P$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{6.5.4 多信号汇总 \texttt{slb\_pwr\_aggregate}}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{变量} & \textbf{方向} & \textbf{类型} & \textbf{含义} \\
+\midrule
+\texttt{P\_lin[]} & 输入 & \texttt{const float *} & $N$ 个业务的线性功率（mW） \\
+\texttt{N} & 输入 & \texttt{uint8\_t} & 同符号业务数 \\
+\texttt{K} & 输入 & \texttt{uint16\_t} & 符号总子载波数 \\
+\texttt{Pmax\_lin} & 输入 & \texttt{float} & $\hat{P}_{\mathrm{MAX}}$（mW） \\
+\texttt{Pk\_lin[]} & 输出 & \texttt{float *} & 每子载波功率 $K$ 个 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{6.5.5 通信测量接口}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{接口} & \textbf{输入} & \textbf{输出} & \textbf{说明} \\
+\midrule
+\texttt{slb\_meas\_rsrp} & 训练 RE 线性功率[] & RSRP（W 或 dBm） & 6.5.5.1 \\
+\texttt{slb\_meas\_rssi} & 符号 RE 总功率[] & RSSI & 6.5.5.2 \\
+\texttt{slb\_meas\_rsrq} & RSRP, RSSI & RSRQ & 6.5.5.3 \\
+\texttt{slb\_meas\_sinr} & RSRP, RSSI & SINR & 6.5.5.4 \\
+\texttt{slb\_meas\_cbra} & 功率序列 + DT 标志 & CBRA $\in[0,1]$ & 6.5.5.5 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{6.5.5 位置测量接口}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{3.2cm}p{4.8cm}p{4.8cm}p{1.5cm}}
+\toprule
+\textbf{接口} & \textbf{输入} & \textbf{输出} & \textbf{说明} \\
+\midrule
+\texttt{slb\_meas\_pms\_csi} &
+测距符号频域 IQ[]、CSI 模式(1/2)、$N_{\mathrm{RX}}$/$N_{\mathrm{TX}}$ &
+\texttt{IQ[linear]}、\texttt{RPL[dBm]}（按子载波） &
+6.5.5.6 \\
+\texttt{slb\_meas\_pms\_timediff} &
+TOA/TOD 时间戳 $t_1\ldots t_6$、信号数(2/3)、节点角色 &
+$T$ 或 $T_1,T_2$ &
+6.5.5.7 \\
+\texttt{slb\_meas\_pms\_aoa} &
+阵列频域/空域接收快照[]、$N_{\mathrm{RX}}$ &
+水平角 $[0,360)$°、垂直角 $[0,180]$° &
+6.5.5.8 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{6.5.5.6 PMS CSI 接口 \texttt{slb\_meas\_pms\_csi}}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{2.2cm}p{0.9cm}p{2.8cm}p{0.7cm}p{5.8cm}}
+\toprule
+\textbf{变量} & \textbf{方向} & \textbf{类型} & \textbf{长度} & \textbf{说明} \\
+\midrule
+\texttt{freq\_iq[]} & 输入 & \texttt{const slb\_complex\_t *} & $N_{\mathrm{sc}}$ & 测距符号到达接收天线连接器的频域 IQ 样本 \\
+\texttt{mode} & 输入 & \texttt{uint8\_t} & 1 & 1=全测距帧算术平均；2=第 $n$ 个测距符号反馈 \\
+\texttt{n\_rx}, \texttt{n\_tx} & 输入 & \texttt{uint8\_t} & 1 & 接收/发送天线端口数 \\
+\texttt{n\_sc} & 输入 & \texttt{uint16\_t} & 1 & 有效子载波数（不含 DC） \\
+\texttt{iq\_linear[]} & 输出 & \texttt{int16\_t *} & $N_{\mathrm{sc}}$ & 12\,bit 有符号相对线性幅度 \\
+\texttt{rpl\_dBm[]} & 输出 & \texttt{int16\_t *} & $N_{\mathrm{sc}}$ & 12\,bit 有符号相对参考功率标尺 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{6.5.5.7 PMS 时间差接口 \texttt{slb\_meas\_pms\_timediff}}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{2.2cm}p{0.9cm}p{2.2cm}p{0.7cm}p{5.8cm}}
+\toprule
+\textbf{变量} & \textbf{方向} & \textbf{类型} & \textbf{长度} & \textbf{说明} \\
+\midrule
+\texttt{t[6]} & 输入 & \texttt{const double *} & 6 & PMS 本地参考时间下的 TOA/TOD：$t_1\ldots t_6$ \\
+\texttt{n\_signals} & 输入 & \texttt{uint8\_t} & 1 & 2=双向两信号；3=双向三信号 \\
+\texttt{node\_role} & 输入 & \texttt{uint8\_t} & 1 & 1=第一位置节点；2=第二位置节点 \\
+\texttt{T} & 输出 & \texttt{double *} & 1 & 两信号：第一节点 $T=t_4-t_1$，第二节点 $T=t_3-t_2$ \\
+\texttt{T1}, \texttt{T2} & 输出 & \texttt{double *} & 2 & 三信号：第一节点 $T_1=t_4-t_1$，$T_2=t_5-t_4$；第二节点 $T_1=t_3-t_2$，$T_2=t_6-t_3$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{6.5.5.8 PMS AoA 接口 \texttt{slb\_meas\_pms\_aoa}}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{2.4cm}p{0.9cm}p{2.8cm}p{1.2cm}p{5.3cm}}
+\toprule
+\textbf{变量} & \textbf{方向} & \textbf{类型} & \textbf{长度} & \textbf{说明} \\
+\midrule
+\texttt{array\_snap[]} & 输入 & \texttt{const slb\_complex\_t *} & $N_{\mathrm{RX}}\times N_{\mathrm{snap}}$ & PMS 在天线阵列处的频域/空域接收快照 \\
+\texttt{n\_rx} & 输入 & \texttt{uint8\_t} & 1 & 阵列天线单元数 \\
+\texttt{n\_snap} & 输入 & \texttt{uint16\_t} & 1 & 用于 DOA 估计的快照数 \\
+\texttt{azimuth\_deg} & 输出 & \texttt{float *} & 1 & 水平角，相对 $X$ 轴逆时针 $[0,360)$° \\
+\texttt{elevation\_deg} & 输出 & \texttt{float *} & 1 & 垂直角，相对 $Z$ 轴 $[0,180]$° \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{时序关系}
+%======================================================================
+
+\begin{itemize}[nosep]
+  \item \textbf{RSRP 测量}：第一训练信号符号到达后、T 符号发射前完成（供 $P_L$ 使用）；
+  \item \textbf{功控计算}：调度确定 $M$、业务类型与 $P_o$ 后、射频发射前；
+  \item \textbf{RSRQ/SINR}：RSRP 与 RSSI 须同符号、同测量窗口；
+  \item \textbf{CBRA}：在 $T_{\mathrm{measure}}$ 内持续采样符号功率；
+  \item \textbf{PMS 测量}：与 6.6 测距帧时序对齐，TOA/TOD 基于 PMS 本地参考时间。
+\end{itemize}
+
+%======================================================================
+\section{接口表格（明确的输入/输出）}
+%======================================================================
+
+\subsection{\texttt{slb\_pwr\_calc\_pathloss}}
+
+\begin{longtable}{p{2.5cm}p{2.5cm}p{1.5cm}p{1.5cm}p{2.5cm}p{4cm}}
+\toprule
+\textbf{参数} & \textbf{类型} & \textbf{长度} & \textbf{必需} & \textbf{来源} & \textbf{说明} \\
+\midrule
+\endhead
+\texttt{gLinkRefPwr\_dBm} & \texttt{float} & 1 & 是 & 系统配置 & G 链路参考功率 \\
+\texttt{rsrp\_dBm} & \texttt{float} & 1 & 是 & 6.5.5.1 & 测得 RSRP \\
+\texttt{PL\_dB} & \texttt{float *} & 1 & 是 & --- & 输出 $P_L$ \\
+\bottomrule
+\end{longtable}
+
+\subsection{\texttt{slb\_pwr\_calc\_initial}}
+
+输入：\texttt{M}、\texttt{P0\_dBm}、\texttt{PL\_dB}；输出：\texttt{P\_dBm}（式\eqref{eq:power}）。
+
+\subsection{\texttt{slb\_meas\_rsrp}}
+
+输入：各天线训练 RE 线性功率数组、RE 数、天线数；输出：\texttt{rsrp\_linear}（多天线取 max 后天线内线性平均）。
+
+\subsection{\texttt{slb\_meas\_rssi}}
+
+输入：符号 RE 总功率数组；输出：\texttt{rssi\_linear}（多天线 max）。
+
+\subsection{\texttt{slb\_meas\_rsrq} / \texttt{slb\_meas\_sinr}}
+
+输入：同符号 \texttt{rsrp\_linear}、\texttt{rssi\_linear}；输出：比值（线性域计算）。
+
+\subsection{\texttt{slb\_meas\_cbra}}
+
+输入：测量窗口内符号功率序列、DT 前导检测结果、帧长；输出：$\mathrm{CBRA}\in[0,1]$。
+
+\subsection{\texttt{slb\_meas\_pms\_csi}}
+
+输入：测距符号频域 IQ 样本 \texttt{freq\_iq[]}、CSI 模式 \texttt{mode}（1=全帧平均，2=特定测距符号）、天线端口数与子载波数；输出：各子载波 \texttt{iq\_linear[]} 与 \texttt{rpl\_dBm[]}（式\eqref{eq:iqdbm} 联合编码字段）。
+
+\subsection{\texttt{slb\_meas\_pms\_timediff}}
+
+输入：PMS 本地参考时间坐标系下 TOA/TOD 时间戳 \texttt{t[6]}、传输信号数 \texttt{n\_signals}（2 或 3）、本节点角色 \texttt{node\_role}；输出：两信号时为单个 $T$，三信号时为 $T_1,T_2$（定义见 6.5.5.7）。
+
+\subsection{\texttt{slb\_meas\_pms\_aoa}}
+
+输入：PMS 在天线阵列处的接收快照 \texttt{array\_snap[]}；输出：参考坐标系（$Z$ 法线、$X$ 正南、$Y$ 正东）下的水平角 \texttt{azimuth\_deg} 与垂直角 \texttt{elevation\_deg}。
+
+%======================================================================
+\section{处理步骤}
+%======================================================================
+
+\subsection{6.5.4 单业务功率计算}
+
+\begin{enumerate}
+  \item 调用 \texttt{slb\_meas\_rsrp} 得 RSRP（dBm 或转 dBm）；
+  \item \texttt{slb\_pwr\_calc\_pathloss}：$P_L=\texttt{gLinkReferenceSignalPower}-\mathrm{RSRP}$；
+  \item 由业务类型查 $P_o$（对应 NominalConfig IE）；
+  \item $P=10\log_{10}(M)+P_o+P_L$。
+\end{enumerate}
+
+\subsection{6.5.4 多业务同符号限幅}
+
+\begin{enumerate}
+  \item 对 $i=0\ldots N-1$ 分别得 $P_i$（dBm），转线性 $\hat{P}_i$；
+  \item $\hat{P}=\min\{\hat{P}_{\mathrm{MAX}},\sum_i \hat{P}_i\}$；
+  \item 若超限，$\hat{P}_k=\hat{P}/K$ 写入各子载波。
+\end{enumerate}
+
+\subsection{6.5.5.1 RSRP}
+
+\begin{enumerate}
+  \item 定位第一训练信号所在符号与各有效 RE；
+  \item 各 RE 线性功率求平均（天线内）；
+  \item 多天线取 max 作为上报 RSRP。
+\end{enumerate}
+
+\subsection{6.5.5.3/6.5.5.4 RSRQ/SINR}
+
+\begin{enumerate}
+  \item 同符号完成 RSRP 与 RSSI 测量；
+  \item 线性域：$\mathrm{RSRQ}=\mathrm{RSRP}/\mathrm{RSSI}$；
+  \item 线性域：$\mathrm{SINR}=\mathrm{RSRP}/(\mathrm{RSSI}-\mathrm{RSRP})$；
+  \item 多天线分别计算后取 max 上报。
+\end{enumerate}
+
+\subsection{6.5.5.5 CBRA}
+
+\begin{enumerate}
+  \item 在 $T_{\mathrm{measure}}$ 内逐符号/逐段采样功率；
+  \item 若检测 DT 前导且同步序列功率 $>-87\,\dBm$，忙时长 = 前导 + 数据帧；
+  \item 否则单符号功率 $>-62\,\dBm$ 则该符号时长计为忙；
+  \item $\mathrm{CBRA}=T_{\mathrm{busy}}/T_{\mathrm{measure}}$。
+\end{enumerate}
+
+\subsection{6.5.5.6 PMS CSI 编码}
+
+\begin{enumerate}
+  \item 对测距符号到达接收天线连接器的频域样本，按模式 1 全帧平均或模式 2 选取第 $n$ 个测距符号；
+  \item 估计各有效子载波 $k$ 的信道系数，得 \texttt{IQ[linear]}（12\,bit 有符号）；
+  \item 配置各子载波 \texttt{RPL[dBm]} 标尺（12\,bit 有符号）；
+  \item 按式\eqref{eq:iqdbm} 计算 \texttt{IQ[dBm]} 供 6.6 解码与测距解算。
+\end{enumerate}
+
+\subsection{6.5.5.7 PMS 时间差}
+
+\begin{enumerate}
+  \item 在 PMS 本地参考时间坐标系下，记录各 PMS 开端到达发送/接收天线连接器的 TOA/TOD，得 $t_1\ldots t_6$；
+  \item 若 PMS 含多端口/波束分量，按标准规定对分量联合测量（加权平均等）后再填入 $t_i$；
+  \item 两信号：第一节点 $T=t_4-t_1$，第二节点 $T=t_3-t_2$；
+  \item 三信号：第一节点 $T_1=t_4-t_1$、$T_2=t_5-t_4$；第二节点 $T_1=t_3-t_2$、$T_2=t_6-t_3$；
+  \item 输出 $T$ 或 $T_1,T_2$ 供 6.6 RTT 距离解算。
+\end{enumerate}
+
+\subsection{6.5.5.8 PMS AoA}
+
+\begin{enumerate}
+  \item 采集 PMS 在天线阵列各单元上的频域/空域接收快照；
+  \item 采用 MUSIC、ESPRIT 或波束扫描等 DOA 算法估计到达方向；
+  \item 映射至参考坐标系：$Z$ 轴为椭球法线，$X$ 正南，$Y$ 正东；
+  \item 输出水平角（相对 $X$ 轴逆时针，$[0,360)$°）与垂直角（相对 $Z$ 轴，$[0,180]$°）。
+\end{enumerate}
+
+%======================================================================
+\section{状态机与时序}
+%======================================================================
+
+功控与测量无复杂内部状态机，但存在\textbf{测量--功控--发射}依赖链：
+\begin{itemize}[nosep]
+  \item 态 1（空闲/同步）：接收 G 链路训练，缓存频域样本；
+  \item 态 2（测量）：RSRP/RSSI 同符号计算；
+  \item 态 3（功控）：$P_L$ 与 $P$ 计算，可选多业务限幅；
+  \item 态 4（发射）：按 $\hat{P}_k$ 映射 T 符号 RE；
+  \item CBRA 与 PMS 测量可并行于上述流程，由上层触发。
+\end{itemize}
+
+%======================================================================
+\section{协议中允许本模块改变的参数}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{参数} & \textbf{来源} & \textbf{影响} \\
+\midrule
+$P_o$（各 NominalConfig） & XRC/系统消息 & 改变目标接收功率 \\
+\texttt{gLinkReferenceSignalPower} & G 节点配置 & 改变 $P_L$ 基准 \\
+$M$, $N$, $K$ & 调度 & 改变 $P$ 与限幅分配 \\
+$P_{\mathrm{MAX}}$ & 射频/法规/节电 & 改变限幅上限 \\
+测量符号/窗口 & MAC 配置 & 改变 RSRP/RSSI/CBRA 采样 \\
+PMS 模式 1/2 & 6.6 流程 & 改变 CSI 平均/符号级反馈 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{约束与极限条件}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{4.5cm}p{9.5cm}}
+\toprule
+\textbf{约束} & \textbf{处理建议} \\
+\midrule
+RSRP/RSSI 须同符号（RSRQ/SINR） & 不同符号输入返回 \texttt{SLB\_PHY\_ERR\_PARAM} \\
+线性域平均后再转 dB & 禁止对 dBm 直接算术平均 \\
+$\mathrm{RSSI}>\mathrm{RSRP}$（SINR） & 分母 $\leq 0$ 时返回错误或钳位 \\
+$M\geq 1$ & $M{=}0$ 返回 \texttt{SLB\_PHY\_ERR\_PARAM} \\
+功控 RSRP 与 $P_L$ 参考信号一致 & 配置不一致将导致功率偏差 \\
+CBRA DT 分支须解析帧长 & 否则忙时长统计错误 \\
+多天线 max 上报 & 模块内统一实现，避免上层重复 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{链路调用对照表}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llcc}
+\toprule
+\textbf{链路/信息块} & \textbf{标准位置} & \textbf{6.5.4} & \textbf{6.5.5} \\
+\midrule
+SRS（T 符号） & 6.2.3 & $P$（\texttt{srs-P0}） & --- \\
+随机接入（T 符号） & 6.2.4 & $P$（\texttt{rach-P0}） & RSRP（$P_L$） \\
+HARQ-ACK（T 符号） & 6.2.4.10 & $P$（\texttt{ack-P0}） & --- \\
+第一类数据（T 符号） & 6.2.5.2 & $P$（\texttt{data-Class1-P0}） & SINR（MCS） \\
+第二类数据（T 符号） & 6.2.5.3 & $P$（\texttt{data-Class2-P0}） & SINR \\
+同步/训练接收 & 6.2.1/6.2.2 & $P_L$ 输入 & RSRP、RSSI \\
+直通/LBT & --- & --- & CBRA \\
+PMS 测距 & 6.2.3/6.6 & --- & CSI、时间差、AoA \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{测量量关系速查}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lllp{4cm}}
+\toprule
+\textbf{测量量} & \textbf{域} & \textbf{主要依赖} & \textbf{典型用途} \\
+\midrule
+RSRP & 功率 & 第一训练信号 & 路径损耗、功控、选网 \\
+RSSI & 功率 & 整符号 & RSRQ/SINR 分母 \\
+RSRQ & 比 & RSRP/RSSI & 负载下链路质量 \\
+SINR & 比 & RSRP/(RSSI-RSRP) & MCS、调度 \\
+CBRA & 时间占比 & 功率门限 + DT & LBT、信道占用 \\
+PMS CSI & 复信道 & 测距符号 & 测距辅助 \\
+PMS 时间差 & 时间 & TOA/TOD & RTT \\
+AoA & 角度 & 阵列 & 定位 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{API 速查}
+%======================================================================
+
+\begin{lstlisting}[language=C]
+/* 6.5.4 功率控制 */
+int slb_pwr_calc_pathloss(float gLinkRefPwr_dBm, float rsrp_dBm, float *PL_dB);
+int slb_pwr_calc_initial(uint16_t M, float P0_dBm, float PL_dB, float *P_dBm);
+int slb_pwr_aggregate(const float *P_lin, uint8_t N, uint16_t K,
+                      float Pmax_lin, float *Pk_lin);
+
+/* 6.5.5 通信测量量 */
+int slb_meas_rsrp(const slb_meas_rsrp_cfg_t *cfg, float *rsrp_linear);
+int slb_meas_rssi(const slb_meas_rssi_cfg_t *cfg, float *rssi_linear);
+int slb_meas_rsrq(float rsrp_linear, float rssi_linear, float *rsrq);
+int slb_meas_sinr(float rsrp_linear, float rssi_linear, float *sinr);
+int slb_meas_cbra(const slb_meas_cbra_cfg_t *cfg, float *cbra);
+
+/* 6.5.5 位置测量量 */
+int slb_meas_pms_csi(const slb_meas_pms_csi_cfg_t *cfg, slb_pms_csi_t *out);
+int slb_meas_pms_timediff(const slb_pms_time_t *t, slb_pms_timediff_t *out);
+int slb_meas_pms_aoa(const slb_meas_pms_aoa_cfg_t *cfg, slb_pms_aoa_t *out);
+\end{lstlisting}
+
+%======================================================================
+\section{错误码}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\begin{tabular}{cll}
+\toprule
+\textbf{宏} & \textbf{值} & \textbf{含义} \\
+\midrule
+\texttt{SLB\_PHY\_OK} & 0 & 成功 \\
+\texttt{SLB\_PHY\_ERR\_PARAM} & $-1$ & 空指针、$M{=}0$、RSRQ/SINR 分母非法 \\
+\texttt{SLB\_PHY\_ERR\_BUF} & $-2$ & 输出缓冲区不足 \\
+\texttt{SLB\_PHY\_ERR\_MEAS} & $-3$ & 测量样本不足或符号不一致 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{工程集成说明}
+%======================================================================
+
+\subsection{文件结构}
+
+\begin{lstlisting}
+20260625-6.5.4-6.5.5-功率控制与测量量1/
+  slb_phy_pwr_meas.h
+  slb_phy_pwr_meas.c
+  SLB物理层6.5.4-6.5.5功率控制与测量量技术文档.tex
+  SLB_6.5.4-6.5.5_功率控制与测量量_学习资料.tex
+\end{lstlisting}
+
+\subsection{与标准其他章节的衔接}
+
+\begin{itemize}[nosep]
+  \item \textbf{6.2.3}：SRS、PMS 等资源映射——测量与功控的对象；
+  \item \textbf{6.5.5.1}：RSRP 定义——6.5.4 路径损耗的直接输入；
+  \item \textbf{6.6}：使用 6.5.5.6\textasciitilde 6.5.5.8 完成测距解算；
+  \item \textbf{XRC/系统消息}：承载 $P_o$ 与测量触发配置。
+\end{itemize}
+
+\subsection{编译}
+
+\begin{lstlisting}[language=bash]
+cc -std=c99 -Wall -Wextra -c slb_phy_pwr_meas.c -o slb_phy_pwr_meas.o
+cc your_phy_module.c slb_phy_pwr_meas.o -lm -o your_phy_app
+\end{lstlisting}
+
+\vfill
+\begin{center}
+\small\textcolor{gray}{精确参数与字段定义以 T/XS 10001-2025 正式标准为准；本文档仅供 SLB 物理层实现与联调参考。}
+\end{center}
+\newpage
+
+%======================================================================
+\part{6.5.6 调制方式}
+%======================================================================
+
+%======================================================================
+\section{协议章节对应}
+%======================================================================
+
+本节对应星闪 SLB 接入层物理层协议 T/XS 10001-2025 第 6.5 节``共性基础算法''中调制方式子节，具体涵盖：
+\begin{itemize}[nosep]
+  \item \textbf{6.5.6.1} QPSK——每 2 比特映射 1 个复数符号，归一化因子 $1/\sqrt{2}$；
+  \item \textbf{6.5.6.2} 16QAM——每 4 比特映射 1 符号，归一化因子 $1/\sqrt{10}$；
+  \item \textbf{6.5.6.3} 64QAM——每 6 比特映射 1 符号，归一化因子 $1/\sqrt{42}$；
+  \item \textbf{6.5.6.4} 256QAM——每 8 比特映射 1 符号，归一化因子 $1/\sqrt{170}$；
+  \item \textbf{6.5.6.5} 1024QAM——每 10 比特映射 1 符号，归一化因子 $1/\sqrt{682}$；
+  \item \textbf{6.5.6.6} 4096QAM——每 12 比特映射 1 符号，归一化因子 $1/\sqrt{2730}$。
+\end{itemize}
+
+%======================================================================
+\section{功能定义}
+%======================================================================
+
+本模块为 SLB 120\,kHz 物理层中控制信息与数据 TB 提供\textbf{比特域 $\rightarrow$ 符号域}的统一调制算法库。6.5.6 不规定信道编码、加扰或资源映射，只规定\textbf{怎么把}编码/加扰后的比特序列 $b(k)$ 映射为复数调制符号 $d(i)$。
+
+输入通常为 6.5.7 加扰输出 $\tilde{g}_k$ 或极化/LDPC 编码后比特流；输出 $d(i)$ 供 6.2.3 资源映射填入 OFDM RE。调制阶数由 MCS 表（6.2.5）或控制信息固定配置（多数为 QPSK）决定。
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lllll}
+\toprule
+\textbf{节号} & \textbf{名称} & \textbf{输入} & \textbf{输出} & \textbf{典型链路用途} \\
+\midrule
+6.5.6.1 & QPSK & $b(2i),b(2i{+}1)$ & $d(i)\in\mathbb{C}$ & 同步/广播/接入/GCI/TCI \\
+6.5.6.2 & 16QAM & $b(4i)\ldots b(4i{+}3)$ & $d(i)$ & 数据 MCS、二阶段 HARQ-ACK \\
+6.5.6.3 & 64QAM & $b(6i)\ldots b(6i{+}5)$ & $d(i)$ & 第一类/第二类数据 \\
+6.5.6.4 & 256QAM & $b(8i)\ldots b(8i{+}7)$ & $d(i)$ & 高阶数据 MCS \\
+6.5.6.5 & 1024QAM & $b(10i)\ldots b(10i{+}9)$ & $d(i)$ & 高阶数据 MCS \\
+6.5.6.6 & 4096QAM & $b(12i)\ldots b(12i{+}11)$ & $d(i)$ & 极良好信道数据 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{与 6.5.3 的边界}：6.5.3 伪随机 QPSK 用于 SRS、DMRS 等\textbf{参考信号}（Gold 序列驱动，系数为 $+1/\sqrt{2}$）；6.5.6 用于\textbf{业务比特}调制（含 leading 负号）。二者数学形式相近，接口与比特来源不得混用。
+
+%======================================================================
+\section{模块边界（上下游及职责划分）}
+%======================================================================
+
+\subsection{上游模块（输入来源）}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{4.2cm}p{4.5cm}p{5.5cm}}
+\toprule
+\textbf{上游模块} & \textbf{输入给本模块的内容} & \textbf{说明} \\
+\midrule
+CRC/信道编码（6.5.1/6.2.6） & 编码比特 $g_k$ & 控制信息极化编码后比特 \\
+比特加扰（6.5.7） & 加扰比特 $\tilde{g}_k$ & 数据 TB 调制前须完成加扰 \\
+MCS/调度配置 & 调制方式枚举 & 表 8\textasciitilde 10 或固定 QPSK \\
+PHY 比特缓冲 & $b(0)\ldots b(N_{\mathrm{bit}}{-}1)$ & 按自然顺序连续消费 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{下游模块（输出去向）}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{4.2cm}p{4.5cm}p{5.5cm}}
+\toprule
+\textbf{下游模块} & \textbf{本模块输出} & \textbf{说明} \\
+\midrule
+资源映射（6.2.3） & 复数符号 $d(i)$ 序列 & 映射到子载波 RE \\
+功率控制（6.5.4） & 符号幅度（归一化） & 平均符号能量为 1，再叠功控 \\
+接收解调 & 星座点参考 & 软判决 LLR 须用相同 Gray 映射 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{本模块不负责的内容}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{5.5cm}p{8.5cm}}
+\toprule
+\textbf{不负责内容} & \textbf{原因} \\
+\midrule
+信道编码与 CRC & 由 6.5.1、6.2.6 负责 \\
+比特加扰 & 由 6.5.7 负责，数据调制输入为 $\tilde{g}_k$ \\
+参考信号 QPSK（6.5.3） & Gold 序列驱动，非业务比特 \\
+资源网格位置与时频分配 & 由 6.2.3 负责 \\
+MCS 选择与链路自适应 & 由 MAC/调度根据 SINR 决定 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{在 SLB 通信流程中的角色}
+%======================================================================
+
+\begin{itemize}
+  \item \textbf{控制信息（6.2.4）}：极化编码 $\rightarrow$ \textbf{6.5.6.1 QPSK} $\rightarrow$ 资源映射；
+  \item \textbf{数据 TB（6.2.5）}：CRC $\rightarrow$ LDPC/极化 $\rightarrow$ 6.5.7 加扰 $\rightarrow$ \textbf{6.5.6.x} $\rightarrow$ 资源映射 $\rightarrow$ 6.5.4 功控；
+  \item \textbf{TCI 二阶段 HARQ-ACK}：依 G 链路数据调制，选 QPSK 或 16QAM（6.5.6.1/6.5.6.2）。
+\end{itemize}
+
+\textbf{推荐复用策略}：工程上维护一份 \texttt{slb\_phy\_mod} 库；按 \texttt{slb\_mod\_type\_e} 分发至各子节实现；QPSK/16QAM 可用查表，64QAM 及以上可用公式或预生成星座表。
+
+%======================================================================
+\section{强制要求与关键参数}
+%======================================================================
+
+\subsection{通用符号约定}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llp{7cm}}
+\toprule
+\textbf{符号} & \textbf{取值/单位} & \textbf{含义} \\
+\midrule
+$b(k)$ & $\{0,1\}$ & 输入比特，按自然顺序从编码/加扰流依次取用 \\
+$d(i)$ & $\mathbb{C}$ & 第 $i$ 个调制符号（同相 I + 正交 Q） \\
+$m$ & 2/4/6/8/10/12 & 每符号比特数 \\
+归一化 & $1/\sqrt{N_{\mathrm{avg}}}$ & 保证平均符号能量为 1 \\
+leading ``$-$'' & 必选 & 所有 6.5.6.x 公式均含整体负号 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{6.5.6.1 QPSK}
+
+$b(2i)$、$b(2i{+}1)$ 映射为：
+\begin{equation}
+  d(i) = -\frac{1}{\sqrt{2}}\Bigl\{
+    \bigl(2b(2i)-1\bigr) + j\bigl(2b(2i+1)-1\bigr)
+  \Bigr\}
+  \label{eq:qpsk}
+\end{equation}
+
+\subsection{6.5.6.2 16QAM}
+
+$b(4i)\ldots b(4i{+}3)$ 映射为：
+\begin{equation}
+  d(i) = -\frac{1}{\sqrt{10}}\Bigl\{
+    \bigl(2b(4i)-1\bigr)\bigl[2-(1-2b(4i+2))\bigr]
+    + j\bigl(2b(4i+1)-1\bigr)\bigl[2-(1-2b(4i+3))\bigr]
+  \Bigr\}
+  \label{eq:16qam}
+\end{equation}
+
+I/Q 各 2 比特，电平 $\{\pm1,\pm3\}$；内层 $2-(1-2b)$ 为 Gray 幅度层级。
+
+\subsection{6.5.6.3 64QAM}
+
+$b(6i)\ldots b(6i{+}5)$，归一化 $1/\sqrt{42}$；I/Q 各 3 比特，电平 $\{\pm1,\pm3,\pm5,\pm7\}$，嵌套结构与 16QAM 相同（三层 $2-(1-2b)$ 组合）。
+
+\subsection{6.5.6.4\textasciitilde 6.5.6.6 高阶 QAM}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{子节} & \textbf{每符号比特} & \textbf{I/Q 比特数} & \textbf{归一化因子} \\
+\midrule
+256QAM & 8 & 4 & $1/\sqrt{170}$ \\
+1024QAM & 10 & 5 & $1/\sqrt{682}$ \\
+4096QAM & 12 & 6 & $1/\sqrt{2730}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+嵌套规律：最内层 $A_0=2-(1-2b)\in\{1,3\}$；向外 $A_k=2^{k+1}-(1-2b_k)\cdot A_{k-1}$；实部 $=(2b_{\mathrm{sign,I}}-1)\cdot A_{m/2-1}$，虚部对称；整体乘 leading ``$-$'' 与归一化因子。
+
+\subsection{标准算例（QPSK）}
+
+$b(0)=1,b(1)=0$：括号内 $1-j$，$d(0)=-\frac{1}{\sqrt{2}}(1-j)=\frac{-1+j}{\sqrt{2}}$。
+
+\subsection{6.5.3 与 6.5.6.1 差异}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+ & \textbf{6.5.3 伪随机 QPSK} & \textbf{6.5.6.1 QPSK} \\
+\midrule
+比特来源 & Gold $c(2m),c(2m{+}1)$ & 编码/加扰 $b(2i),b(2i{+}1)$ \\
+系数 & $+1/\sqrt{2}$ & $-1/\sqrt{2}$（式\eqref{eq:qpsk}） \\
+用途 & SRS、DMRS、CSI-RS 等 & 控制信息、数据 TB \\
+子载波 & 固定 161（$k{=}80$ 置零） & 由调度决定 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{数据类型、长度/维度}
+%======================================================================
+
+\subsection{调制类型枚举 \texttt{slb\_mod\_type\_e}}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{枚举值} & \textbf{标准子节} & \textbf{每符号比特 $m$} \\
+\midrule
+\texttt{SLB\_MOD\_QPSK} & 6.5.6.1 & 2 \\
+\texttt{SLB\_MOD\_16QAM} & 6.5.6.2 & 4 \\
+\texttt{SLB\_MOD\_64QAM} & 6.5.6.3 & 6 \\
+\texttt{SLB\_MOD\_256QAM} & 6.5.6.4 & 8 \\
+\texttt{SLB\_MOD\_1024QAM} & 6.5.6.5 & 10 \\
+\texttt{SLB\_MOD\_4096QAM} & 6.5.6.6 & 12 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{通用调制接口 \texttt{slb\_mod\_map}}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lllll}
+\toprule
+\textbf{变量} & \textbf{方向} & \textbf{类型} & \textbf{长度} & \textbf{说明} \\
+\midrule
+\texttt{bits[]} & 输入 & \texttt{const uint8\_t *} & $N_{\mathrm{bit}}$ & 比特缓冲，取 $\{0,1\}$ \\
+\texttt{N\_bit} & 输入 & \texttt{uint32\_t} & 1 & 输入比特总数 \\
+\texttt{mod\_type} & 输入 & \texttt{slb\_mod\_type\_e} & 1 & 调制方式 \\
+\texttt{symbols[]} & 输出 & \texttt{slb\_cplx\_t *} & $N_{\mathrm{bit}}/m$ & 复数符号（float I/Q） \\
+\texttt{N\_sym} & 输出 & \texttt{uint32\_t *} & 1 & 实际输出符号数 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\texttt{slb\_cplx\_t}：\texttt{struct \{ float re; float im; \}}。
+
+\subsection{单符号接口（各子节）}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{接口} & \textbf{输入} & \textbf{输出} & \textbf{说明} \\
+\midrule
+\texttt{slb\_mod\_qpsk\_one} & $b(2i),b(2i{+}1)$ & $d(i)$ & 6.5.6.1 \\
+\texttt{slb\_mod\_16qam\_one} & $b(4i)\ldots b(4i{+}3)$ & $d(i)$ & 6.5.6.2 \\
+\texttt{slb\_mod\_64qam\_one} & 6 比特 & $d(i)$ & 6.5.6.3 \\
+\texttt{slb\_mod\_256qam\_one} & 8 比特 & $d(i)$ & 6.5.6.4 \\
+\texttt{slb\_mod\_1024qam\_one} & 10 比特 & $d(i)$ & 6.5.6.5 \\
+\texttt{slb\_mod\_4096qam\_one} & 12 比特 & $d(i)$ & 6.5.6.6 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{时序关系}
+%======================================================================
+
+\begin{itemize}[nosep]
+  \item \textbf{控制信息}：极化编码完成、比特序确定后、资源映射前调用 QPSK 调制；
+  \item \textbf{数据 TB}：6.5.7 加扰完成后、资源映射前调用；调制阶数与 MCS 同步切换；
+  \item \textbf{比特消费}：$b(2i)$ 必须先于 $b(2i{+}1)$；跨符号不得乱序；
+  \item \textbf{与功控}：调制输出归一化符号后，由 6.5.4 按 $M$、$P_o$、$P_L$ 决定 RE 发射功率。
+\end{itemize}
+
+%======================================================================
+\section{接口表格（明确的输入/输出）}
+%======================================================================
+
+\subsection{\texttt{slb\_mod\_map}}
+
+\begin{longtable}{p{2.5cm}p{2.5cm}p{1.5cm}p{1.5cm}p{2.5cm}p{4cm}}
+\toprule
+\textbf{参数} & \textbf{类型} & \textbf{长度} & \textbf{必需} & \textbf{来源} & \textbf{说明} \\
+\midrule
+\endhead
+\texttt{bits} & \texttt{const uint8\_t *} & $N_{\mathrm{bit}}$ & 是 & 6.5.7/6.2.6 & 输入比特流 \\
+\texttt{N\_bit} & \texttt{uint32\_t} & 1 & 是 & 调度 & 须为 $m$ 的整数倍 \\
+\texttt{mod\_type} & \texttt{slb\_mod\_type\_e} & 1 & 是 & MCS/6.2 & 调制方式 \\
+\texttt{symbols} & \texttt{slb\_cplx\_t *} & $\geq N_{\mathrm{bit}}/m$ & 是 & --- & 输出缓冲 \\
+\texttt{N\_sym} & \texttt{uint32\_t *} & 1 & 是 & --- & 输出符号数 \\
+\bottomrule
+\end{longtable}
+
+\subsection{\texttt{slb\_mod\_qpsk\_one}}
+
+输入：\texttt{b0}、\texttt{b1} $\in\{0,1\}$；输出：\texttt{slb\_cplx\_t}（式\eqref{eq:qpsk}）。
+
+%======================================================================
+\section{处理步骤}
+%======================================================================
+
+\subsection{批量调制（通用）}
+
+\begin{enumerate}
+  \item 根据 \texttt{mod\_type} 查每符号比特数 $m$；
+  \item 校验 $N_{\mathrm{bit}} \bmod m = 0$，否则返回 \texttt{SLB\_PHY\_ERR\_PARAM}；
+  \item 对 $i=0\ldots N_{\mathrm{bit}}/m-1$，取 $b(mi)\ldots b(mi{+}m{-}1)$；
+  \item 调用对应 \texttt{slb\_mod\_*\_one} 得 $d(i)$；
+  \item 写入 \texttt{symbols[i]}，\texttt{*N\_sym} $= N_{\mathrm{bit}}/m$。
+\end{enumerate}
+
+\subsection{6.5.6.2 16QAM 单符号（公式拆解）}
+
+\begin{enumerate}
+  \item 内层：$A_I=2-(1-2b(4i{+}2))$，$A_Q=2-(1-2b(4i{+}3))$ $\in\{1,3\}$；
+  \item 外层符号：$\mathrm{Re}=(2b(4i)-1)\cdot A_I$，$\mathrm{Im}=(2b(4i{+}1)-1)\cdot A_Q$；
+  \item $d(i)=-\frac{1}{\sqrt{10}}(\mathrm{Re}+j\mathrm{Im})$。
+\end{enumerate}
+
+\subsection{64QAM 及以上}
+
+从最内层 $2-(1-2b)$ 向外递推幅度层级，再乘符号位，最后整体乘 $-1/\sqrt{N_{\mathrm{avg}}}$。高阶建议查表或代码生成，避免手写嵌套错误。
+
+%======================================================================
+\section{状态机与时序}
+%======================================================================
+
+调制模块为\textbf{无状态}纯函数：每次调用仅依赖当前比特切片与 \texttt{mod\_type}。在 PHY 发送流水线中的位置：
+
+\begin{itemize}[nosep]
+  \item 态 1（编码完成）：比特缓冲就绪；
+  \item 态 2（加扰完成，数据链路）：$\tilde{g}_k$ 作为 $b(k)$；
+  \item 态 3（调制）：$b(k)\to d(i)$；
+  \item 态 4（映射/功控）：$d(i)$ 填入 RE 并叠发射功率。
+\end{itemize}
+
+%======================================================================
+\section{协议中允许本模块改变的参数}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{参数} & \textbf{来源} & \textbf{影响} \\
+\midrule
+\texttt{mod\_type} & MCS 表/6.2 固定配置 & 映射公式与频谱效率 \\
+输入比特序 & 6.5.7/6.2.6 & 须与收发一致 \\
+浮点/定点 Q 格式 & 工程实现 & EVM 与 bit-exact 测试 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+PHY \textbf{不得}自行升级调制阶数；仅执行上层指定的 6.5.6.x 子节。
+
+%======================================================================
+\section{约束与极限条件}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{4.5cm}p{9.5cm}}
+\toprule
+\textbf{约束} & \textbf{处理建议} \\
+\midrule
+$N_{\mathrm{bit}}$ 须为 $m$ 整数倍 & 否则返回 \texttt{SLB\_PHY\_ERR\_PARAM} \\
+比特须先加扰（数据链路） & 输入应为 $\tilde{g}_k$，非原始 $g_k$ \\
+leading 负号必须实现 & 省略或与 6.5.3 混用将导致 EVM 失败 \\
+不得与 6.5.3 接口混用 & 参考信号走 \texttt{slb\_qpsk\_rs\_gen} \\
+输出缓冲 $\geq N_{\mathrm{bit}}/m$ & 不足返回 \texttt{SLB\_PHY\_ERR\_BUF} \\
+解调 LLR 须同 Gray 映射 & 嵌套 $2-(1-2b)$ 即 Gray 层次 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{链路调用对照表}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{链路/信息块} & \textbf{标准位置} & \textbf{6.5.6 调制} \\
+\midrule
+同步信息 & 6.2.4.1.2 & QPSK \\
+广播信息 & 6.2.4.3.2 & QPSK \\
+接入信息 & 6.2.4.4.2 & QPSK \\
+GCI & 6.2.4.6.8 & QPSK \\
+TCI（含二阶段 HARQ-ACK） & 6.2.4.10.5 & QPSK / 16QAM \\
+第一类数据 & 6.2.5.2.2 & QPSK\textasciitilde 4096QAM（MCS 表 8） \\
+第二类数据 & 6.2.5.3.2 & QPSK\textasciitilde 4096QAM（表 9/10） \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{调制方式速查}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{调制} & \textbf{$m$} & \textbf{归一化} & \textbf{典型场景} \\
+\midrule
+QPSK & 2 & $1/\sqrt{2}$ & 控制信道、低 MCS 数据 \\
+16QAM & 4 & $1/\sqrt{10}$ & 中 MCS、二阶段 ACK \\
+64QAM & 6 & $1/\sqrt{42}$ & 中高 MCS 数据 \\
+256QAM & 8 & $1/\sqrt{170}$ & 高 MCS 数据 \\
+1024QAM & 10 & $1/\sqrt{682}$ & 极高 MCS \\
+4096QAM & 12 & $1/\sqrt{2730}$ & 极好信道数据 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{API 速查}
+%======================================================================
+
+\begin{lstlisting}[language=C]
+typedef enum {
+    SLB_MOD_QPSK = 0,
+    SLB_MOD_16QAM,
+    SLB_MOD_64QAM,
+    SLB_MOD_256QAM,
+    SLB_MOD_1024QAM,
+    SLB_MOD_4096QAM
+} slb_mod_type_e;
+
+typedef struct { float re; float im; } slb_cplx_t;
+
+/* 批量调制 */
+int slb_mod_map(const uint8_t *bits, uint32_t N_bit,
+                slb_mod_type_e mod_type,
+                slb_cplx_t *symbols, uint32_t *N_sym);
+
+/* 单符号（各子节） */
+slb_cplx_t slb_mod_qpsk_one(uint8_t b0, uint8_t b1);
+slb_cplx_t slb_mod_16qam_one(const uint8_t b[4]);
+slb_cplx_t slb_mod_64qam_one(const uint8_t b[6]);
+slb_cplx_t slb_mod_256qam_one(const uint8_t b[8]);
+slb_cplx_t slb_mod_1024qam_one(const uint8_t b[10]);
+slb_cplx_t slb_mod_4096qam_one(const uint8_t b[12]);
+
+uint8_t slb_mod_bits_per_symbol(slb_mod_type_e mod_type);
+\end{lstlisting}
+
+%======================================================================
+\section{错误码}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\begin{tabular}{cll}
+\toprule
+\textbf{宏} & \textbf{值} & \textbf{含义} \\
+\midrule
+\texttt{SLB\_PHY\_OK} & 0 & 成功 \\
+\texttt{SLB\_PHY\_ERR\_PARAM} & $-1$ & 空指针、$N_{\mathrm{bit}}$ 非 $m$ 倍数、非法 \texttt{mod\_type} \\
+\texttt{SLB\_PHY\_ERR\_BUF} & $-2$ & 输出符号缓冲区不足 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{工程集成说明}
+%======================================================================
+
+\subsection{文件结构}
+
+\begin{lstlisting}
+20260626-6.5.6-调制方式/
+  slb_phy_mod.h
+  slb_phy_mod.c
+  SLB物理层6.5.6调制方式技术文档.tex
+  SLB_6.5.6_调制方式_学习资料.tex
+\end{lstlisting}
+
+\subsection{与标准其他章节的衔接}
+
+\begin{itemize}[nosep]
+  \item \textbf{6.5.7}：数据调制前须完成加扰，输入为 $\tilde{g}_k$；
+  \item \textbf{6.5.3}：参考信号 QPSK 独立实现，不得调用本模块；
+  \item \textbf{6.5.4}：调制符号映射到 RE 后叠功控；
+  \item \textbf{6.2.6}：编码速率与调制阶数共同决定 MCS。
+\end{itemize}
+
+\subsection{编译}
+
+\begin{lstlisting}[language=bash]
+cc -std=c99 -Wall -Wextra -c slb_phy_mod.c -o slb_phy_mod.o
+cc your_phy_module.c slb_phy_mod.o -lm -o your_phy_app
+\end{lstlisting}
+
+\vfill
+\begin{center}
+\small\textcolor{gray}{精确参数与字段定义以 T/XS 10001-2025 正式标准为准；本文档仅供 SLB 物理层实现与联调参考。}
+\end{center}
+\newpage
+
+%======================================================================
+\part{6.5.7～6.5.9 比特加扰、波形与序列}
+%======================================================================
+
+%======================================================================
+\section{协议章节对应}
+%======================================================================
+
+本节对应星闪 SLB 接入层物理层协议 T/XS 10001-2025 第 6.5 节``共性基础算法''中下列子节：
+\begin{itemize}[nosep]
+  \item \textbf{6.5.7} 比特加扰——编码/速率匹配后比特与 Gold 序列模 2 加，$c_{\mathrm{init}}=n_f\cdot 2^{24}+\NGPID$；
+  \item \textbf{6.5.8} SC-FDMA 波形生成——调制符号按 SC-FDMA 符号分段 DFT 预编码，输出 $y(n)$；
+  \item \textbf{6.5.9} Zadoff-Chu 序列——基序列 $r_{u,v}(n)$ 与循环移位 $\alpha$ 生成 DMRS 等参考序列；
+  \item \textbf{6.5.9.1} 序列组跳——由 Gold 序列派生时隙相关组号 $u=(f_{\mathrm{gh}}(n_S)+f_{\mathrm{SS}})\bmod 30$。
+\end{itemize}
+
+%======================================================================
+\section{功能定义}
+%======================================================================
+
+本模块组为 SLB 120\,kHz 物理层提供\textbf{比特域加扰}、\textbf{SC-FDMA 预编码}与\textbf{ZC 参考序列生成}三类共性算法。不规定 CRC、信道编码、调制星座或资源网格位置，只规定上述三阶段的\textbf{输入输出关系与闭式公式}。
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lllll}
+\toprule
+\textbf{节号} & \textbf{名称} & \textbf{输入} & \textbf{输出} & \textbf{典型链路用途} \\
+\midrule
+6.5.7 & 比特加扰 & $t_i$、$c_{\mathrm{init}}$ & $\tilde{t}_i$ & 6.2.5 数据 TB、6.3.3 深覆盖业务 \\
+6.5.8 & SC-FDMA 预编码 & $x(n)$ 符号块 & $y(n)$ & 6.3.3 广播/控制/数据 SC-FDMA \\
+6.5.9 & ZC 序列 & $u,v,\alpha,m$ & $r_{u,v}^{(\alpha)}(n)$ & 6.3.3.2.2 DMRS \\
+6.5.9.1 & 序列组跳 & $n_S$、$n_{\mathrm{ID}}^{X}$ & $u$ & ZC 组号时变 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{与 6.5.2/6.5.3 的边界}：6.5.2 Gold 序列为底层引擎；6.5.3 将 Gold 映射为 QPSK 参考信号；6.5.7/6.5.9.1 使用\textbf{不同} $c_{\mathrm{init}}$ 调用同一 Gold 生成器，不得与 6.5.3 接口混用。
+
+%======================================================================
+\section{模块边界（上下游及职责划分）}
+%======================================================================
+
+\subsection{上游模块（输入来源）}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{4.2cm}p{4.5cm}p{5.5cm}}
+\toprule
+\textbf{上游模块} & \textbf{输入给本模块的内容} & \textbf{说明} \\
+\midrule
+信道编码/速率匹配（6.2.6） & 比特 $g_k$ 或 $t_i$ & 6.5.7 加扰输入 \\
+调度/RRC & $\NGPID$、起始无线帧索引 & 计算 $n_f$ 与 $c_{\mathrm{init}}$ \\
+Gold 序列（6.5.2） & $c(i)$ 比特流 & 加扰与组跳共用引擎 \\
+调制（6.5.6） & 复数符号 $x(n)$ 或 $d(i)$ & 6.5.8 预编码输入 \\
+系统/业务配置 & $N_{\mathrm{ID}}^{\mathrm{TS}}$、510、高层 $c_{\mathrm{init}}$ & 6.3.3 特例 \\
+DMRS 调度 & $m$、$\alpha$、$n_{\mathrm{ID}}^{X}$、时隙 $n_S$ & 6.5.9/6.5.9.1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{下游模块（输出去向）}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{4.2cm}p{4.5cm}p{5.5cm}}
+\toprule
+\textbf{下游模块} & \textbf{本模块输出} & \textbf{说明} \\
+\midrule
+调制（6.5.6） & $\tilde{g}_k$ & 6.5.7 加扰后比特 \\
+资源映射（6.2.3/6.3.3） & $y(n)$ & SC-FDMA 预编码符号 \\
+DMRS 映射（6.3.3.2.2） & $r_{u,v}^{(\alpha)}(n)$ & 再经 OCC $w(m)$ 与 $\beta_{\mathrm{RS}}$ \\
+接收解扰 & 恢复 $t_i$ & 与发送相同 $c_{\mathrm{init}}$ 再 XOR \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{本模块不负责的内容}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{5.5cm}p{8.5cm}}
+\toprule
+\textbf{不负责内容} & \textbf{原因} \\
+\midrule
+Gold 序列 LFSR 实现 & 由 6.5.2 负责 \\
+QPSK 参考信号（6.5.3） & 独立 $c_{\mathrm{init}}$ 与映射 \\
+调制星座映射（6.5.6） & 加扰在调制之前 \\
+IFFT/CP/上变频（6.3.3.6） & 6.5.8 仅 DFT 预编码 \\
+表 16 常量维护 & 工程 ROM，标准给定 \\
+资源网格 RE 位置 & 由 6.2.3/6.3.3 负责 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{在 SLB 通信流程中的角色}
+%======================================================================
+
+\begin{itemize}
+  \item \textbf{6.2.5 数据 TB}：编码 $\rightarrow$ \textbf{6.5.7 加扰} $\rightarrow$ 6.5.6 调制 $\rightarrow$ 资源映射；
+  \item \textbf{6.3.3 深覆盖}：CRC + \textbf{6.5.7 加扰} $\rightarrow$ 6.5.6 调制 $\rightarrow$ \textbf{6.5.8 SC-FDMA} $\rightarrow$ 资源映射；并行生成 \textbf{6.5.9 DMRS}；
+  \item \textbf{6.3.3.2.2 解调参考信号}：6.5.9.1 组跳得 $u$ $\rightarrow$ 6.5.9 基序列 + $\alpha$ $\rightarrow$ OCC 与功率因子映射。
+\end{itemize}
+
+\textbf{推荐复用策略}：维护 \texttt{slb\_phy\_scram}、\texttt{slb\_phy\_scfdma}、\texttt{slb\_phy\_zc} 三个子模块；Gold 生成统一调用 \texttt{slb\_pn\_gold\_generate}（6.5.2）。
+
+%======================================================================
+\section{强制要求与关键参数}
+%======================================================================
+
+\subsection{6.5.7 比特加扰}
+
+输入 $t_0,\ldots,t_K$，输出 $\tilde{t}_0,\ldots,\tilde{t}_K$：
+\begin{equation}
+  \tilde{t}_i = (t_i + c(i)) \bmod 2
+  \label{eq:scramble}
+\end{equation}
+$c(i)$ 由 6.5.2 Gold 序列生成；数据 TB 默认：
+\begin{equation}
+  c_{\mathrm{init}} = n_f \cdot 2^{24} + \NGPID
+  \label{eq:cinit_scramble}
+\end{equation}
+$n_f$：数据起始无线帧索引低 7 位；$\NGPID$：G 节点物理层标识。
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llp{7cm}}
+\toprule
+\textbf{符号} & \textbf{类型/范围} & \textbf{含义} \\
+\midrule
+$t_i,\tilde{t}_i$ & $\{0,1\}$ & 加扰前/后比特 \\
+$c(i)$ & $\{0,1\}$ & Gold 伪随机比特 \\
+$c_{\mathrm{init}}$ & \texttt{uint32\_t} & Gold 初始化参数 \\
+$n_f$ & 7 bit & 无线帧索引 $\bmod 128$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{6.3.3 加扰 $c_{\mathrm{init}}$ 特例}：
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{业务} & \textbf{$c_{\mathrm{init}}$} & \textbf{标准位置} \\
+\midrule
+系统广播 & $N_{\mathrm{ID}}^{\mathrm{TS}}$ & 6.3.3.3 \\
+控制信息 & $510$ & 6.3.3.4 \\
+物理层数据 & 高层配置 & 6.3.3.5 \\
+第一类/第二类数据 & 式\eqref{eq:cinit_scramble} & 6.2.5 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{6.5.8 SC-FDMA 波形生成}
+
+符号块 $x(0),\ldots,x(M_{\mathrm{symb}}-1)$ 分成 $L=M_{\mathrm{symb}}/M_{\mathrm{SC}}^{\mathrm{Total}}$ 段，每段长度 $M_{\mathrm{SC}}^{\mathrm{Total}}=M_{\mathrm{SCG},1} N_{\mathrm{SCG},1}$，且 $M_{\mathrm{SCG},1}=2^{\alpha_2}3^{\alpha_3}5^{\alpha_5}$。
+
+对 $l=0,\ldots,L-1$，$k=0,\ldots,M_{\mathrm{SC}}^{\mathrm{Total}}-1$：
+\begin{equation}
+  y\!\left(l M + k\right)
+  = \frac{1}{\sqrt{M}}
+  \sum_{i=0}^{M-1}
+  x(l M + i)\,
+  e^{-\mathrm{j} 2\pi i k / M}
+  \label{eq:scfdma}
+\end{equation}
+其中 $M=M_{\mathrm{SC}}^{\mathrm{Total}}$。输出 $y(0),\ldots,y(M_{\mathrm{symb}}-1)$。
+
+\subsection{6.5.9 Zadoff-Chu 序列}
+
+循环移位形式：
+\begin{equation}
+  r_{u,v}^{(\alpha)}(n) = e^{\mathrm{j}\alpha n}\, r_{u,v}(n),\quad 0 \leq n < M_{\mathrm{SC}}^{\mathrm{RS}}
+  \label{eq:zc_shift}
+\end{equation}
+$M_{\mathrm{SC}}^{\mathrm{RS}}=m N_{\mathrm{SCG},1}$，$1 \leq m \leq \lfloor N_{\mathrm{sc}}^{\mathrm{Total}}/N_{\mathrm{SCG},3}\rfloor$。
+
+\textbf{基序列 $r_{u,v}(n)$}：$u\in\{0,\ldots,29\}$；$1\leq m\leq 5$ 时仅 $v=0$；$6\leq m\leq \lfloor N_{\mathrm{sc}}^{\mathrm{Total}}/N_{\mathrm{SCG},1}\rfloor$ 时 $v\in\{0,1\}$。
+
+\textbf{$m=2$}：查标准表~\ref{tab:16}（30 组 $\exp(\pm \mathrm{j}k\pi/4)$ 相位序列），不得用 ZC 公式。基序列为
+\begin{equation}
+  r_{u,v}(n) = \exp\!\left(-\mathrm{j}\,\frac{\phi(n)\,\pi}{4}\right),\quad
+  0 \leq n < M_{\mathrm{SC}}^{\mathrm{RS}},\ v=0
+  \label{eq:m2_base}
+\end{equation}
+其中 $\phi(n)\in\{1,-1,3,-3\}$，按组号 $u\in\{0,\ldots,29\}$ 由表~\ref{tab:16} 给出；$M_{\mathrm{SC}}^{\mathrm{RS}}=2N_{\mathrm{SCG},1}$ 时对应 $\phi(0),\ldots,\phi(2N_{\mathrm{SCG},1}-1)$。
+
+{\scriptsize
+\begin{longtable}{@{}c*{12}{@{\,}c@{\,}}@{}}
+\caption{表 16：$m=2$ 时基序列相位 $\phi(n)$ 定义（$r_{u,v}(n)=\exp(-\mathrm{j}\phi(n)\pi/4)$，$v=0$）}
+\label{tab:16} \\
+\toprule
+$u$ & $\phi(0)$ & $\phi(1)$ & $\phi(2)$ & $\phi(3)$ & $\phi(4)$ & $\phi(5)$ &
+$\phi(6)$ & $\phi(7)$ & $\phi(8)$ & $\phi(9)$ & $\phi(10)$ & $\phi(11)$ \\
+\midrule
+\endfirsthead
+\multicolumn{13}{c}{\tablename\ \thetable{}（续）} \\
+\toprule
+$u$ & $\phi(0)$ & $\phi(1)$ & $\phi(2)$ & $\phi(3)$ & $\phi(4)$ & $\phi(5)$ &
+$\phi(6)$ & $\phi(7)$ & $\phi(8)$ & $\phi(9)$ & $\phi(10)$ & $\phi(11)$ \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+0  & $-1$ &  1 &  3 & $-3$ &  3 &  3 &  1 &  1 &  3 &  1 & $-3$ &  3 \\
+1  &  1 &  1 &  3 &  3 &  3 & $-1$ &  1 & $-3$ & $-3$ &  1 & $-3$ &  3 \\
+2  &  1 &  1 & $-3$ & $-3$ & $-3$ & $-1$ & $-3$ & $-3$ &  1 & $-3$ &  1 & $-1$ \\
+3  & $-1$ &  1 &  1 &  1 &  1 & $-1$ & $-3$ & $-3$ &  1 & $-3$ &  3 & $-1$ \\
+4  & $-1$ &  3 &  1 & $-1$ &  1 & $-1$ & $-3$ & $-1$ &  1 & $-1$ &  1 &  3 \\
+5  &  1 & $-3$ &  3 & $-1$ & $-1$ &  1 &  1 & $-1$ & $-1$ &  3 & $-3$ &  1 \\
+6  & $-1$ &  3 & $-3$ & $-3$ & $-3$ &  3 &  1 & $-1$ &  3 &  3 & $-3$ &  1 \\
+7  & $-3$ & $-1$ & $-1$ & $-1$ &  1 & $-3$ &  3 & $-1$ &  1 & $-3$ &  3 &  1 \\
+8  &  1 & $-3$ &  3 &  1 & $-1$ & $-1$ & $-1$ &  1 &  1 &  3 & $-1$ &  1 \\
+9  &  1 & $-3$ & $-1$ &  3 &  3 & $-1$ & $-3$ &  1 &  1 &  1 &  1 &  1 \\
+10 & $-1$ &  3 & $-1$ &  1 &  1 & $-3$ & $-3$ & $-1$ & $-3$ & $-3$ &  3 & $-1$ \\
+11 &  3 &  1 & $-1$ & $-1$ &  3 &  3 & $-3$ &  1 &  3 &  1 &  3 &  3 \\
+12 &  1 & $-3$ &  1 &  1 & $-3$ &  1 &  1 &  1 & $-3$ & $-3$ & $-3$ &  1 \\
+13 &  3 &  3 & $-3$ &  3 & $-3$ &  1 &  1 &  3 & $-1$ & $-3$ &  3 &  3 \\
+14 & $-3$ &  1 & $-1$ & $-3$ & $-1$ &  3 &  1 &  3 &  3 &  3 & $-1$ &  1 \\
+15 &  3 & $-1$ &  1 & $-3$ & $-1$ & $-1$ &  1 &  1 &  3 &  1 & $-1$ & $-3$ \\
+16 &  1 &  3 &  1 & $-1$ &  1 &  3 &  3 &  3 & $-1$ & $-1$ &  3 & $-1$ \\
+17 & $-3$ &  1 &  1 &  3 & $-3$ &  3 & $-3$ & $-3$ &  3 &  1 &  3 & $-1$ \\
+18 & $-3$ &  3 &  1 &  1 & $-3$ &  1 & $-3$ & $-3$ & $-1$ & $-1$ &  1 & $-3$ \\
+19 & $-1$ &  3 &  1 &  3 &  1 & $-1$ & $-1$ &  3 & $-3$ & $-1$ & $-3$ & $-1$ \\
+20 & $-1$ & $-3$ &  1 &  1 &  1 &  1 &  3 &  1 & $-1$ &  1 & $-3$ & $-1$ \\
+21 & $-1$ &  3 & $-1$ &  1 & $-3$ & $-3$ & $-3$ & $-3$ & $-3$ &  1 & $-1$ & $-3$ \\
+22 &  1 &  1 & $-3$ & $-3$ & $-3$ & $-3$ & $-1$ &  3 & $-3$ &  1 & $-3$ &  3 \\
+23 &  1 &  1 & $-1$ & $-3$ & $-1$ & $-3$ &  1 & $-1$ &  1 &  3 & $-1$ &  1 \\
+24 &  1 &  1 &  3 &  1 &  3 &  3 & $-1$ &  1 & $-1$ & $-3$ & $-3$ &  1 \\
+25 &  1 & $-3$ &  3 &  3 &  1 &  3 &  3 &  1 & $-3$ & $-1$ & $-1$ &  3 \\
+26 &  1 &  3 & $-3$ & $-3$ &  3 & $-3$ &  1 & $-1$ & $-1$ &  3 & $-1$ & $-3$ \\
+27 & $-3$ & $-1$ & $-3$ & $-1$ & $-3$ &  3 &  1 & $-1$ &  1 &  3 & $-3$ & $-3$ \\
+28 & $-1$ &  3 & $-3$ &  3 & $-1$ &  3 &  3 & $-3$ &  3 &  3 & $-1$ & $-1$ \\
+29 &  3 & $-3$ & $-3$ & $-1$ & $-1$ & $-3$ & $-1$ &  3 & $-3$ &  3 &  1 & $-1$ \\
+\end{longtable}
+}
+
+\textbf{$m>3$}：
+\begin{align}
+  r_{u,v}(n) &= x_q(n \bmod N_{\mathrm{ZC}}^{\mathrm{RS}}) \\
+  x_q(m) &= \exp\!\left(-\mathrm{j}\frac{\pi q\, m(m+1)}{N_{\mathrm{ZC}}^{\mathrm{RS}}}\right) \\
+  \bar{q} &= N_{\mathrm{ZC}}^{\mathrm{RS}}(u+1)/31 \\
+  q &= \lfloor \bar{q} + \tfrac{1}{2}\rfloor + v\cdot(-1)^{\lfloor 2\bar{q}\rfloor}
+\end{align}
+$N_{\mathrm{ZC}}^{\mathrm{RS}}$：小于 $M_{\mathrm{SC}}^{\mathrm{RS}}$ 的最大质数。
+
+\subsection{6.5.9.1 序列组跳}
+
+\begin{equation}
+  u = (f_{\mathrm{gh}}(n_S) + f_{\mathrm{SS}}) \bmod 30
+  \label{eq:group_hop}
+\end{equation}
+\begin{align}
+  f_{\mathrm{gh}}(n_S) &= \Bigl(\sum_{i=0}^{7} c(8n_S+i)\,2^i\Bigr) \bmod 30 \\
+  f_{\mathrm{SS}} &= \lfloor n_{\mathrm{ID}}^{X}/16\rfloor \bmod 30 \\
+  c_{\mathrm{init}} &= \lfloor n_{\mathrm{ID}}^{X}/30\rfloor
+\end{align}
+
+\subsection{DMRS 组合（6.3.3.2.2 引用）}
+
+\begin{equation}
+  r(m M_{\mathrm{RS}} + n) = w(m)\, r_{u,v}^{(\alpha)}(n)
+\end{equation}
+$w(m)$ 依广播/控制/数据及 $n_{\mathrm{ID}}^{X}\bmod 2$ 取 $\pm1$ 组合；映射 $a_{k,l}=\_{\mathrm{RS}} r_{n,l}(k)$。
+
+\subsection{Gold $c_{\mathrm{init}}$ 三场景对照}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{场景} & \textbf{标准节} & \textbf{$c_{\mathrm{init}}$} \\
+\midrule
+QPSK 参考信号 & 6.5.3 & $n,l,\mathrm{G\text{-}ID},\mathrm{CP}$ 组合 \\
+比特加扰 & 6.5.7 & $n_f\cdot 2^{24}+\NGPID$ \\
+ZC 组跳 & 6.5.9.1 & $\lfloor n_{\mathrm{ID}}^{X}/30\rfloor$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{数据类型、长度/维度}
+%======================================================================
+
+\subsection{加扰 \texttt{slb\_phy\_scram}}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{变量} & \textbf{类型} & \textbf{长度} & \textbf{说明} \\
+\midrule
+\texttt{bits\_in[]} & \texttt{const uint8\_t *} & $K{+}1$ & 输入 $t_i\in\{0,1\}$ \\
+\texttt{bits\_out[]} & \texttt{uint8\_t *} & $K{+}1$ & 输出 $\tilde{t}_i$ \\
+\texttt{N\_bit} & \texttt{uint32\_t} & 1 & 比特数 \\
+\texttt{c\_init} & \texttt{uint32\_t} & 1 & Gold 初始化 \\
+\texttt{scram\_ctx} & \texttt{slb\_gold\_ctx\_t} & 1 & 可选：复用 6.5.2 上下文 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{SC-FDMA \texttt{slb\_phy\_scfdma}}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{变量} & \textbf{类型} & \textbf{长度} & \textbf{说明} \\
+\midrule
+\texttt{x[]} & \texttt{const slb\_cplx\_t *} & $M_{\mathrm{symb}}$ & 调制符号输入 \\
+\texttt{y[]} & \texttt{slb\_cplx\_t *} & $M_{\mathrm{symb}}$ & 预编码输出 \\
+\texttt{M\_sc\_total} & \texttt{uint16\_t} & 1 & $M_{\mathrm{SC}}^{\mathrm{Total}}$ \\
+\texttt{N\_sym} & \texttt{uint32\_t} & 1 & $L=M_{\mathrm{symb}}/M_{\mathrm{sc\_total}}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{ZC 序列 \texttt{slb\_phy\_zc}}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{变量} & \textbf{类型} & \textbf{长度} & \textbf{说明} \\
+\midrule
+\texttt{u} & \texttt{uint8\_t} & 1 & 组号 $0\ldots 29$ \\
+\texttt{v} & \texttt{uint8\_t} & 1 & 基序列号 $0$ 或 $1$ \\
+\texttt{alpha} & \texttt{float} & 1 & 循环移位（弧度/样点） \\
+\texttt{m} & \texttt{uint8\_t} & 1 & 长度因子 \\
+\texttt{seq[]} & \texttt{slb\_cplx\_t *} & $M_{\mathrm{RS}}$ & 输出 $r_{u,v}^{(\alpha)}(n)$ \\
+\texttt{n\_s} & \texttt{uint32\_t} & 1 & 时隙（组跳） \\
+\texttt{n\_id\_x} & \texttt{uint32\_t} & 1 & $n_{\mathrm{ID}}^{X}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{时序关系}
+%======================================================================
+
+\begin{itemize}[nosep]
+  \item \textbf{6.2.5 数据}：编码完成 $\rightarrow$ 6.5.7 加扰 $\rightarrow$ 6.5.6 调制 $\rightarrow$ 映射（无 6.5.8）；
+  \item \textbf{6.3.3 深覆盖}：加扰 $\rightarrow$ 调制 $\rightarrow$ \textbf{6.5.8} 预编码 $\rightarrow$ 映射；
+  \item \textbf{DMRS}：可在帧内并行生成；组跳 $u$ 随 $n_S$ 变化，须在生成 $r_{u,v}$ 前更新 $u$；
+  \item \textbf{解扰}：接收译码前，与发送相同 $c_{\mathrm{init}}$ 再执行式\eqref{eq:scramble}。
+\end{itemize}
+
+%======================================================================
+\section{接口表格（明确的输入/输出）}
+%======================================================================
+
+\subsection{\texttt{slb\_scram\_apply}}
+
+\begin{longtable}{p{2.5cm}p{2.5cm}p{1.5cm}p{1.5cm}p{2.5cm}p{4cm}}
+\toprule
+\textbf{参数} & \textbf{类型} & \textbf{长度} & \textbf{必需} & \textbf{来源} & \textbf{说明} \\
+\midrule
+\endhead
+\texttt{bits\_in} & \texttt{const uint8\_t *} & $N$ & 是 & 6.2.6 & 编码后比特 \\
+\texttt{bits\_out} & \texttt{uint8\_t *} & $N$ & 是 & --- & 加扰输出 \\
+\texttt{N\_bit} & \texttt{uint32\_t} & 1 & 是 & 调度 & 比特长度 \\
+\texttt{c\_init} & \texttt{uint32\_t} & 1 & 是 & 6.5.7/6.3.3 & Gold 初始化 \\
+\bottomrule
+\end{longtable}
+
+\subsection{\texttt{slb\_scfdma\_precode}}
+
+\begin{longtable}{p{2.5cm}p{2.5cm}p{1.5cm}p{1.5cm}p{2.5cm}p{4cm}}
+\toprule
+\textbf{参数} & \textbf{类型} & \textbf{长度} & \textbf{必需} & \textbf{来源} & \textbf{说明} \\
+\midrule
+\endhead
+\texttt{x} & \texttt{const slb\_cplx\_t *} & $M_{\mathrm{symb}}$ & 是 & 6.5.6 & 调制符号 \\
+\texttt{y} & \texttt{slb\_cplx\_t *} & $M_{\mathrm{symb}}$ & 是 & --- & 预编码输出 \\
+\texttt{M\_sc\_total} & \texttt{uint16\_t} & 1 & 是 & 带宽配置 & DFT 长度 \\
+\texttt{M\_symb} & \texttt{uint32\_t} & 1 & 是 & 调度 & 须被 $M_{\mathrm{sc\_total}}$ 整除 \\
+\bottomrule
+\end{longtable}
+
+\subsection{\texttt{slb\_zc\_gen} / \texttt{slb\_zc\_group\_hop}}
+
+\begin{longtable}{p{2.8cm}p{2.5cm}p{1.5cm}p{1.5cm}p{2.2cm}p{4cm}}
+\toprule
+\textbf{参数} & \textbf{类型} & \textbf{长度} & \textbf{必需} & \textbf{来源} & \textbf{说明} \\
+\midrule
+\endhead
+\texttt{u,v,alpha,m} & 各 1 & 1 & 是 & DMRS 配置 & 6.5.9 \\
+\texttt{seq} & \texttt{slb\_cplx\_t *} & $M_{\mathrm{RS}}$ & 是 & --- & 输出序列 \\
+\texttt{n\_s,n\_id\_x} & \texttt{uint32\_t} & 1 & 组跳时 & 6.3.3 & 6.5.9.1 \\
+\texttt{u\_out} & \texttt{uint8\_t *} & 1 & 组跳时 & --- & 式\eqref{eq:group_hop} \\
+\bottomrule
+\end{longtable}
+
+%======================================================================
+\section{处理步骤}
+%======================================================================
+
+\subsection{6.5.7 比特加扰（发送）}
+
+\begin{enumerate}
+  \item 按业务类型计算 $c_{\mathrm{init}}$（式\eqref{eq:cinit_scramble} 或 6.3.3 特例）；
+  \item 调用 \texttt{slb\_pn\_gold\_generate}($c_{\mathrm{init}}$, $N_{\mathrm{bit}}$) 得 $c(i)$；
+  \item 对 $i=0\ldots N_{\mathrm{bit}}-1$：$\tilde{t}_i = t_i \oplus c(i)$；
+  \item 输出送入 6.5.6 调制。
+\end{enumerate}
+
+\textbf{接收解扰}：步骤 1\textasciitilde 2 相同，$\tilde{t}_i \oplus c(i) \rightarrow t_i$。
+
+\subsection{6.5.8 SC-FDMA 预编码}
+
+\begin{enumerate}
+  \item 校验 $M_{\mathrm{symb}} \bmod M_{\mathrm{SC}}^{\mathrm{Total}} = 0$；
+  \item $L \leftarrow M_{\mathrm{symb}}/M_{\mathrm{SC}}^{\mathrm{Total}}$；
+  \item 对每个 $l=0\ldots L-1$，对输入段 $x(lM\ldots lM+M-1)$ 做 $M$ 点 DFT（式\eqref{eq:scfdma}）；
+  \item 写入 $y(lM\ldots lM+M-1)$。
+\end{enumerate}
+
+\subsection{6.5.9 ZC 基序列生成}
+
+\begin{enumerate}
+  \item 由 $m$ 判断：$m=2$ 查表 16；$m>3$ 走 ZC 闭式；
+  \item 若启用组跳：先 \texttt{slb\_zc\_group\_hop}($n_S,n_{\mathrm{ID}}^{X}$) 得 $u$；
+  \item 计算 $N_{\mathrm{ZC}}^{\mathrm{RS}}$、$q$、生成 $r_{u,v}(n)$；
+  \item 乘 $e^{\mathrm{j}\alpha n}$ 得 $r_{u,v}^{(\alpha)}(n)$。
+\end{enumerate}
+
+\subsection{6.5.9.1 序列组跳}
+
+\begin{enumerate}
+  \item $c_{\mathrm{init}} \leftarrow \lfloor n_{\mathrm{ID}}^{X}/30\rfloor$；
+  \item 生成 $c(8n_S)\ldots c(8n_S+7)$；
+  \item $f_{\mathrm{gh}} \leftarrow (\sum c_i 2^i)\bmod 30$，$f_{\mathrm{SS}} \leftarrow \lfloor n_{\mathrm{ID}}^{X}/16\rfloor \bmod 30$；
+  \item $u \leftarrow (f_{\mathrm{gh}}+f_{\mathrm{SS}})\bmod 30$。
+\end{enumerate}
+
+%======================================================================
+\section{状态机与时序}
+%======================================================================
+
+\begin{itemize}[nosep]
+  \item \textbf{加扰}：无跨 TB 状态；每 TB 按起始帧重算 $c_{\mathrm{init}}$；
+  \item \textbf{SC-FDMA}：无状态；每符号段独立 DFT；
+  \item \textbf{ZC/组跳}：$u$ 随时隙 $n_S$ 变化；同一时隙内 DMRS 复用同一 $u$；
+  \item \textbf{PHY 流水线}：态 1 编码 $\rightarrow$ 态 2 加扰 $\rightarrow$ 态 3 调制 $\rightarrow$ 态 4 SC-FDMA（若 6.3.3）$\rightarrow$ 态 5 映射。
+\end{itemize}
+
+%======================================================================
+\section{协议中允许本模块改变的参数}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{参数} & \textbf{来源} & \textbf{影响} \\
+\midrule
+$c_{\mathrm{init}}$（加扰） & 帧索引、$\NGPID$、6.3.3 业务 & 加扰序列 \\
+$M_{\mathrm{SC}}^{\mathrm{Total}}$ & 带宽/$M_{\mathrm{SCG},1}$ & DFT 长度 \\
+$u,v,\alpha,m$ & DMRS 调度 & ZC 序列 \\
+$n_S,n_{\mathrm{ID}}^{X}$ & 时隙/CRC & 组跳 $u$ \\
+浮点/定点 FFT & 工程实现 & EVM/一致性 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+PHY \textbf{不得}自行更改标准规定的 $c_{\mathrm{init}}$ 公式或 DFT 归一化因子。
+
+%======================================================================
+\section{约束与极限条件}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{4.5cm}p{9.5cm}}
+\toprule
+\textbf{约束} & \textbf{处理建议} \\
+\midrule
+加扰在调制之前 & 6.5.6 输入须为 $\tilde{g}_k$ \\
+$c_{\mathrm{init}}$ 场景不可混用 & 加扰/组跳/QPSK RS 分别计算 \\
+$M_{\mathrm{symb}}\bmod M_{\mathrm{SC}}^{\mathrm{Total}}\neq 0$ & 返回 \texttt{SLB\_PHY\_ERR\_PARAM} \\
+$m=2$ 须查表 16 & 禁止误用 ZC 公式 \\
+$m>3$ 须用质数 $N_{\mathrm{ZC}}^{\mathrm{RS}}$ & 预置质数表 \\
+组跳 $c(i)$ 与加扰 $c(i)$ 独立初始化 & 不可共用同一次 Gold 偏移 \\
+输出缓冲长度不足 & 返回 \texttt{SLB\_PHY\_ERR\_BUF} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{链路调用对照表}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{链路/信息块} & \textbf{标准位置} & \textbf{6.5.7} & \textbf{6.5.8/6.5.9} \\
+\midrule
+第一类数据 & 6.2.5.2.2 & 加扰 & --- \\
+第二类数据 & 6.2.5.3.2 & 加扰 & --- \\
+系统广播 & 6.3.3.3 & $c_{\mathrm{init}}=N_{\mathrm{ID}}^{\mathrm{TS}}$ & SC-FDMA \\
+控制信息 & 6.3.3.4 & $c_{\mathrm{init}}=510$ & SC-FDMA \\
+物理层数据 & 6.3.3.5 & 高层 $c_{\mathrm{init}}$ & SC-FDMA \\
+解调参考信号 & 6.3.3.2.2 & --- & ZC + 组跳 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{算法速查}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{功能} & \textbf{核心公式/操作} & \textbf{$c_{\mathrm{init}}$ 或关键参数} \\
+\midrule
+加扰 & $\tilde{t}_i=t_i\oplus c(i)$ & $n_f\cdot 2^{24}+\NGPID$ \\
+SC-FDMA & $M$ 点 DFT + $1/\sqrt{M}$ & $M=M_{\mathrm{SCG},1}N_{\mathrm{SCG},1}$ \\
+ZC ($m>3$) & $x_q(m)=e^{-\mathrm{j}\pi qm(m+1)/N_{\mathrm{ZC}}}$ & $q$ 由 $u,v$ \\
+组跳 & $u=(f_{\mathrm{gh}}+f_{\mathrm{SS}})\bmod 30$ & $\lfloor n_{\mathrm{ID}}^{X}/30\rfloor$ \\
+DMRS & $r(mM+n)=w(m)r_{u,v}^{(\alpha)}(n)$ & 表 16（$m=2$） \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{API 速查}
+%======================================================================
+
+\begin{lstlisting}[language=C]
+/* ---------- 6.5.7 加扰 ---------- */
+int slb_scram_apply(const uint8_t *bits_in, uint8_t *bits_out,
+                    uint32_t N_bit, uint32_t c_init);
+
+uint32_t slb_scram_cinit_data(uint8_t n_f_low7, uint32_t n_g_pid);
+
+/* ---------- 6.5.8 SC-FDMA ---------- */
+int slb_scfdma_precode(const slb_cplx_t *x, slb_cplx_t *y,
+                       uint32_t M_symb, uint16_t M_sc_total);
+
+/* ---------- 6.5.9 ZC ---------- */
+int slb_zc_group_hop(uint32_t n_s, uint32_t n_id_x, uint8_t *u_out);
+
+int slb_zc_gen(uint8_t u, uint8_t v, float alpha, uint8_t m,
+               slb_cplx_t *seq, uint16_t M_rs);
+
+int slb_zc_gen_m2_table(uint8_t u, slb_cplx_t *seq, uint16_t M_rs);
+\end{lstlisting}
+
+%======================================================================
+\section{错误码}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\begin{tabular}{cll}
+\toprule
+\textbf{宏} & \textbf{值} & \textbf{含义} \\
+\midrule
+\texttt{SLB\_PHY\_OK} & 0 & 成功 \\
+\texttt{SLB\_PHY\_ERR\_PARAM} & $-1$ & 空指针、长度不整除、非法 $u/m$ \\
+\texttt{SLB\_PHY\_ERR\_BUF} & $-2$ & 输出缓冲不足 \\
+\texttt{SLB\_PHY\_ERR\_MODE} & $-3$ & $m=2$ 与 ZC 路径混用、不支持的长度 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{工程集成说明}
+%======================================================================
+
+\subsection{文件结构}
+
+\begin{lstlisting}
+20260625-6.5.7-6.5.9-比特加扰波形生成与序列/
+  slb_phy_scram.h / slb_phy_scram.c
+  slb_phy_scfdma.h / slb_phy_scfdma.c
+  slb_phy_zc.h / slb_phy_zc.c
+  SLB物理层6.5.7-6.5.9比特加扰波形生成与序列技术文档.tex
+  SLB_6.5.7-6.5.9_比特加扰波形生成与序列_学习资料.tex
+\end{lstlisting}
+
+\subsection{与标准其他章节的衔接}
+
+\begin{itemize}[nosep]
+  \item \textbf{6.5.2}：Gold 生成器为加扰与组跳共用；
+  \item \textbf{6.5.6}：加扰输出为调制输入；调制输出为 SC-FDMA 输入；
+  \item \textbf{6.2.5}：数据路径引用 6.5.7；
+  \item \textbf{6.3.3}：深覆盖引用 6.5.7/6.5.8/6.5.9 全套；
+  \item \textbf{6.5.4}：SC-FDMA 符号映射后仍须功控（T 符号）。
+\end{itemize}
+
+\subsection{编译}
+
+\begin{lstlisting}[language=bash]
+xelatex SLB物理层6.5.7-6.5.9比特加扰波形生成与序列技术文档.tex
+cc -std=c99 -Wall -c slb_phy_scram.c slb_phy_scfdma.c slb_phy_zc.c
+\end{lstlisting}
+
+\vfill
+\begin{center}
+\small\textcolor{gray}{精确参数与字段定义以 T/XS 10001-2025 正式标准为准；本文档仅供 SLB 物理层实现与联调参考。}
+\end{center}
+\newpage
+
+\section{全模块 API 速查}
+
+\begin{lstlisting}[language=C]
+#include "slb_phy.h"
+
+/* 6.5.1-6.5.3 */
+slb_crc_encode(&enc); slb_crc_check(&chk);
+slb_pn_gold_generate(&pn);
+slb_qpsk_ref_generate(&qpsk);
+
+/* 6.5.4-6.5.5 */
+slb_pwr_calc_pathloss(...); slb_pwr_calc_initial(...);
+slb_meas_rsrp(...); slb_meas_rsrq(...); slb_meas_sinr(...);
+
+/* 6.5.6 */
+slb_mod_map(bits, N_bit, SLB_MOD_64QAM, symbols, &N_sym);
+
+/* 6.5.7-6.5.9 */
+slb_scram_apply(in, out, N, c_init);
+slb_scfdma_precode(x, y, M_symb, M_sc_total);
+slb_zc_group_hop(n_s, n_id_x, &u);
+slb_zc_gen(u, v, alpha, m, seq, M_rs);
+\end{lstlisting}
+
+\subsection{编译与测试}
+
+\begin{lstlisting}[language=bash]
+cd E:/实习/AI代码/6.5物理层通用功能
+make test
+\end{lstlisting}
+
+\vfill
+\begin{center}
+\small\textcolor{gray}{精确参数与字段定义以 T/XS 10001-2025 正式标准为准；本文档仅供 SLB 物理层实现与联调参考。}
+\end{center}
+
+\end{document}
