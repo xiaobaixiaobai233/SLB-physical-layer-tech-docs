@@ -1,0 +1,558 @@
+% !TEX program = xelatex
+\documentclass[11pt,a4paper]{ctexart}
+
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{longtable}
+
+\geometry{left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm}
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue}
+
+\title{%
+  \textbf{星闪 SLB 物理层}\\[0.4em]
+  \Large 6.2.5 物理层数据信息技术文档\\[0.3em]
+  \large 第一类 \textbullet\ 第二类数据 \textbullet\ A-PDIB
+}
+\author{依据 T/XS 10001-2025《星闪无线通信系统 接入层\\
+同步低时延宽带空口 SLB 技术要求和测试方法》整理\\
+（团体标准 20250326 版）}
+\date{2026 年 6 月 23 日}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+%======================================================================
+\part{总览}
+%======================================================================
+
+\section{文档范围与模块划分}
+
+本文档对应 SLB 120\,kHz 物理层协议第 6.2.5 节``物理层数据信息''，涵盖 6.2.5.1\textasciitilde 6.2.5.4 全部子节，定义\textbf{第一类数据信息}、\textbf{第二类数据信息}及\textbf{附链路物理层数据信息块 A-PDIB} 的传输流程、调制编码、多流 MIMO 与资源映射规则。
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{子节} & \textbf{内容} & \textbf{核心输出} \\
+\midrule
+6.2.5.1 & 概述 & 预配置/动态调度 TB 传输模式 \\
+6.2.5.2 & 第一类数据信息 & $K{\times}N$ 比特、预配置调度、CRC/极化/映射 \\
+6.2.5.3 & 第二类数据信息 & MCS 表 8/9/10、$A_{\mathrm{TBS}}$、多流、G/T/D 映射 \\
+6.2.5.4 & A-PDIB & 附链路 STS/FTS/DMRS-D/数据 RE 布局 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{与 6.2.4/6.2.6 的关系}
+
+6.2.4 物理层控制信息提供调度语义：预配置调度激活去激活信息指示第一类/第二类数据的时频资源与调制编码索引；动态调度数据控制信息（DSCI）指示第二类数据 TB 的初传/重传/CBG 重传及资源分配。6.2.5 在收到上述控制指示后，完成 TB 比特组装、CRC、码块分段、极化编码（调用 6.2.6）、加扰（6.5.7）、调制（6.5.6）与 RE 映射。
+
+6.2.6 信道编码为本节的数据处理\textbf{核心依赖}：第一/二类数据均执行 6.2.6.1.1\textasciitilde 6.2.6.1.4 极化编码流程；码块数量 $C$、信道比特长度 $E_{\mathrm{tot}}$、$E_r$ 由 6.2.5 确定后传入 6.2.6。DMRS-D（6.2.3.6）伴随数据映射，接收端依 DMRS 信道估计解调 6.2.5 输出的调制符号。
+
+\section{PHY 数据发送流水线}
+
+\begin{enumerate}[nosep]
+  \item \textbf{调度解析}（6.2.4）：预配置 \texttt{DataResourceConfPackage} 或 DSCI $\rightarrow$ 资源、MCS、初传/重传标志、流数 $\upsilon$；
+  \item \textbf{信息比特确定}：第一类 $B=K{\cdot}N$；第二类初传按 $A_{\mathrm{TBS}}$ 公式，重传复用初传 $C$ 与 $A_{\mathrm{TBS}}$；
+  \item \textbf{CRC 附加}（6.5.1）：第一类可选 CRC24A/16/8；第二类固定 CRC24A，$L=24$；
+  \item \textbf{码块分段}：$C$、$E_{\mathrm{tot}}$、$E_r$ 计算（$N_m=4096$）；
+  \item \textbf{极化编码}（6.2.6.1.1\textasciitilde 6.2.6.1.4）$\rightarrow$ 比特序列 $g_k$，扩展为 $g^{\mathrm{E}}_k$；
+  \item \textbf{加扰}（6.5.7）$\rightarrow$ $\tilde{g}_k$；\textbf{调制}（6.5.6）$\rightarrow$ 符号序列 $d_i$；
+  \item \textbf{多流处理}（仅第二类，6.2.5.3.3）：重复/层映射 $\rightarrow$ 空间流 $x^{(\ell)}(i)$ $\rightarrow$ 端口 $y^{(p)}(i)$；
+  \item \textbf{资源映射}（6.2.5.2.3/6.2.5.3.4）：排除 DMRS-D RE，按符号/子载波索引顺序映射到 G/T/D/A 链路 RE 网格（6.2.2）。
+\end{enumerate}
+
+\newpage
+%======================================================================
+\part{6.2.5 物理层数据信息}
+%======================================================================
+
+\section{协议章节对应}
+
+本节对应 T/XS 10001-2025 第 6.2.5 节，完整涵盖 6.2.5.1\textasciitilde 6.2.5.4。
+
+\section{功能定义}
+
+6.2.5 的核心功能为：将高层/MAC 待发送的用户载荷比特，经 CRC、信道编码、加扰与调制，映射到 6.2.2 定义的 RE 网格上，形成可经 6.2.9 OFDM 合成的\textbf{物理层数据波形}。支持：
+\begin{enumerate}[nosep]
+  \item 预配置调度下的低时延周期性 TB 传输（第一/二类）；
+  \item 动态调度下的灵活资源与 MCS 适配（第二类）；
+  \item 多 TB 同 TTI、多流 MIMO 与重复传输（第二类）；
+  \item 附链路 A-PDIB 内嵌同步、DMRS-D 与附链路数据。
+\end{enumerate}
+
+\section{模块边界（上下游及职责划分）}
+
+\subsection{上游模块}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{4cm}p{4.5cm}p{5.5cm}}
+\toprule
+\textbf{上游} & \textbf{输入} & \textbf{说明} \\
+\midrule
+6.2.4 控制信息 & 预配置/DSCI、MCS 索引、资源指示 & 调度与 HARQ 语义 \\
+高层 RRC/XRC & \texttt{DataResourceConfPackage}、MCS 表配置 & 第一类 $K$、$N$、CRC 长度 \\
+6.2.2 帧结构 & RE $(k,l)_p$、符号类型 G/T/D/A & 映射坐标 \\
+6.2.3 DMRS-D & 导频 RE 位置、$r_{n,l}(k)$ & 解调参考 \\
+6.2.6 信道编码 & $B$、$C$、$E_r$ & 极化码参数 \\
+6.5.1/6.5.6/6.5.7 & CRC 多项式、调制、加扰 & 比特$\rightarrow$符号 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{下游模块}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{4cm}p{4.5cm}p{5.5cm}}
+\toprule
+\textbf{下游} & \textbf{本模块输出} & \textbf{说明} \\
+\midrule
+6.2.9 基带信号生成 & RE 复数值 $a_{k,l}^{(p)}$ & OFDM IFFT 输入 \\
+接收机解调 & 调制符号 $d_i$ / 端口符号 $y^{(p)}$ & 均衡、译码 \\
+6.2.6 译码侧 & 软比特/硬比特 & 极化解码、CRC 校验 \\
+MAC/RLC & 还原 TB 载荷 & HARQ 合并 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{本模块不负责的内容}
+
+物理层控制比特字段语义（6.2.4）、极化码内部算法细节（6.2.6 编码核）、DMRS 序列生成（6.2.3）、OFDM 调制与射频（6.2.9/6.2.10）。
+
+\section{在 SLB 通信流程中的角色}
+
+6.2.5 处于 PHY \textbf{用户数据承载层}：SAB/控制块（6.2.4）完成接入与调度 $\rightarrow$ 6.2.5 在指示的 TTI/RE 上映射 TB $\rightarrow$ DMRS-D 伴随 $\rightarrow$ 接收端信道估计（6.2.3）$\rightarrow$ 译码（6.2.6）$\rightarrow$ MAC HARQ。附链路场景下，A-PDIB（6.2.5.4）在 T 节点侧独立组织同步、参考与附链路数据。
+
+%----------------------------------------------------------------------
+\section{强制要求与关键参数（T/XS 10001-2025 原文）}
+%----------------------------------------------------------------------
+
+\subsection{6.2.5.1 概述}
+
+\begin{itemize}[nosep]
+  \item 同步低时延宽带通信系统的预配置调度方式传输数据支持一个传输块在一个 TTI 中传输。
+  \item 同步低时延宽带通信系统的预配置调度方式传输数据支持以一个或多个 TTI 为周期传输，其中每个周期在一个 TTI 中传输一个传输块，每个周期传输的传输块采用 TTI 中相同的资源配置和相同的调制编码方式。
+  \item 同步低时延宽带通信系统的预配置调度方式传输数据支持以一个 TTI 为周期传输第一类数据信息，其中每个周期在一个 TTI 中传输多个传输块，每个周期传输的传输块数量相同，每个传输块采用相同的调制编码方式，TTI 中传输该多个传输块的资源配置相同。
+  \item 同步低时延宽带通信系统支持动态调度传输，动态调度的数据支持一个传输块在一个 TTI 中传输。该一个传输块在该一个 TTI 中的时频资源由动态调度数据控制信息指示。在同一个 TTI 中，支持由多个动态调度数据控制信息各调度一个传输块，以实现多个传输块在一个 TTI 中传输。
+\end{itemize}
+
+\subsection{6.2.5.2 第一类数据信息}
+
+\subsubsection{6.2.5.2.1 传输流程}
+
+第一类数据信息传输仅支持预配置调度传输。
+
+\subsubsection{6.2.5.2.2 信息比特和调制编码方式}
+
+第一类数据信息调度信息通过高层信令 \texttt{DataResourceConfPackage} 发送，指示第一类数据信息的封装个数信息 $N$ 和采样位宽信息 $K$，调制方式信息（QPSK、16QAM、64QAM、256QAM、1024QAM、4096QAM），以及传输整个封装使用的物理资源，其中 $N \geq 1$，$K \in \{8,16,24,32,40,48,56,64,72,80,88,96,104,112,120,128\}$。一个传输块的信息比特数目为 $K \cdot N$，信息比特序列表示为 $a_0, a_1, a_2, a_3, \ldots, a_{K \cdot N - 1}$，根据本文件 6.5.1 节的处理方法，使用循环冗余校验生成多项式 $g_{\mathrm{CRC24A}}(D)$、$g_{\mathrm{CRC16}}(D)$ 或 $g_{\mathrm{CRC8}}(D)$ 计算序列 $a_0, a_1, a_2, a_3, \ldots, a_{K \cdot N - 1}$ 的循环冗余校验比特 $p_0, p_1, p_2, p_3, \ldots, p_{L-1}$，并生成循环冗余校验后的输出比特序列 $b_0, b_1, b_2, b_3, \ldots, b_{K \cdot N + L - 1}$，其中 $L = 24$，16 或 8，该数值由高层配置。
+
+信道比特序列数 $E_{\mathrm{tot}} = N_{\mathrm{RE}} \cdot Q_m$，其中 $N_{\mathrm{RE}}$ 是调度的子载波数，$Q_m$ 是调制方式。
+
+计算分段数 $C$：
+\begin{equation}
+C = \left\lfloor \frac{E_{\mathrm{tot}}}{N_m} \right\rfloor
+\end{equation}
+其中，$N_m$ 的值为 4096。如果 $\mod(E_{\mathrm{tot}}, N_m) \neq 0$ 且 $(R > \tfrac{7}{16} \;\|\; C < 9)$ 且 $(E_{\mathrm{tot}} - C \cdot N_m) \cdot R > T$，则 $C = C + 1$，否则 $C = \max(1, C)$；其中 $R$ 是调制编码索引指示的编码速率，$T$ 根据码率 $R$ 确定，如果 $R > \tfrac{2}{3}$ 则 $T = 192$；否则 $T = 384$。
+
+信道比特序列长度 $E_{\mathrm{tot}}$，以及每个编码块分段对应的信道比特序列长度 $E_r$ 的计算方法如下，其中 $0 \leq r < C$，$C$ 是编码块分段的数量：
+\begin{itemize}[nosep]
+  \item 当 $C = 1$ 时，$E_0 = E_{\mathrm{tot}}$。
+  \item 当 $C > 1$ 时，每个编码块分段对应的信道比特序列长度 $E_r$ 为：$E_r = \lfloor E_{\mathrm{tot}} / C \rfloor$，其中 $0 \leq r < C$。
+\end{itemize}
+
+第一类数据信息传输使用本文件 6.2.6 规定的信道编码参数，进行 6.2.6.1.1、6.2.6.1.2、6.2.6.1.3 和 6.2.6.1.4 的极化编码，产生比特序列 $g_k$，其中 $k = 0, \ldots, \lfloor E_{\mathrm{tot}} / C \rfloor \cdot C - 1$。比特序列 $g_k$ 扩展为 $g^{\mathrm{E}}_k$，其中 $g^{\mathrm{E}}_k = g_k$，$k = 0, \ldots, \lfloor E_{\mathrm{tot}} / C \rfloor \cdot C - 1$，$k = \lfloor E_{\mathrm{tot}} / C \rfloor \cdot C, \ldots, E_{\mathrm{tot}}$ 时 $g^{\mathrm{E}}_k = 0$。将 $g^{\mathrm{E}}_k$ 根据本文件 6.5.7 节的方法产生比特加扰后的比特序列 $\tilde{g}_k$，根据本文件 6.5.6 节的方法将比特序列 $\tilde{g}_k$ 映射为调制符号序列 $d_i$。
+
+\subsubsection{6.2.5.2.3 资源映射}
+
+调制符号序列 $d_i$ 在被配置的时频上按照符号索引的先后顺序，以及每个符号中子载波索引从小到大的顺序映射到各符号的子载波上。
+
+对于 G 链路和 T 链路，在被调度的时频资源中，除了映射 DMRS-D 的时频资源，其它时频资源都用于映射第一类数据信息。
+
+对于附链路，映射第一类数据信息的资源见 6.2.5.4 节。
+
+\subsection{6.2.5.3 第二类数据信息}
+
+\subsubsection{6.2.5.3.1 传输流程}
+
+第二类数据信息传输支持预配置调度传输和动态调度传输。
+
+\subsubsection{6.2.5.3.2 调制编码方式和信息比特}
+
+第二类数据信息传输的编码采用极化码，不同的调制方式以及编码速率如下表 8，表 9，表 10 所示：
+
+\begin{longtable}{ccc}
+\caption{表 8 第二类数据信息传输调制编码方式表格 1，高可靠} \\
+\toprule
+\textbf{调制编码索引} & \textbf{调制方式} & \textbf{编码速率 $(R) \times 1024$} \\
+\midrule
+\endfirsthead
+\multicolumn{3}{c}{\tablename\ \thetable\ （续）} \\
+\toprule
+\textbf{调制编码索引} & \textbf{调制方式} & \textbf{编码速率 $(R) \times 1024$} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+0 & QPSK & 64 \\
+1 & QPSK & 80 \\
+2 & QPSK & 96 \\
+3 & QPSK & 112 \\
+4 & QPSK & 128 \\
+5 & QPSK & 160 \\
+6 & QPSK & 192 \\
+7 & QPSK & 224 \\
+8 & QPSK & 256 \\
+9 & QPSK & 288 \\
+10 & QPSK & 320 \\
+11 & QPSK & 384 \\
+12 & QPSK & 448 \\
+13 & QPSK & 512 \\
+14 & QPSK & 576 \\
+15 & QPSK & 640 \\
+16 & QPSK & 704 \\
+17 & 16QAM & 384 \\
+18 & 16QAM & 448 \\
+19 & 16QAM & 512 \\
+20 & 16QAM & 576 \\
+21 & 16QAM & 640 \\
+22 & 16QAM & 704 \\
+23 & 64QAM & 448 \\
+24 & 64QAM & 512 \\
+25 & 64QAM & 576 \\
+26 & 64QAM & 640 \\
+27 & 64QAM & 704 \\
+28 & 64QAM & 768 \\
+29 & 64QAM & 832 \\
+30 & 64QAM & 896 \\
+31 & 64QAM & 960 \\
+\end{longtable}
+
+\begin{longtable}{ccc}
+\caption{表 9 第二类数据信息传输调制编码方式表格 2，常规} \\
+\toprule
+\textbf{调制编码索引} & \textbf{调制方式} & \textbf{编码速率 $(R) \times 1024$} \\
+\midrule
+\endfirsthead
+\multicolumn{3}{c}{\tablename\ \thetable\ （续）} \\
+\toprule
+\textbf{调制编码索引} & \textbf{调制方式} & \textbf{编码速率 $(R) \times 1024$} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+0 & QPSK & 96 \\
+1 & QPSK & 128 \\
+2 & QPSK & 192 \\
+3 & QPSK & 256 \\
+4 & QPSK & 320 \\
+5 & QPSK & 448 \\
+6 & QPSK & 576 \\
+7 & QPSK & 704 \\
+8 & 16QAM & 384 \\
+9 & 16QAM & 448 \\
+10 & 16QAM & 512 \\
+11 & 16QAM & 576 \\
+12 & 16QAM & 640 \\
+13 & 16QAM & 704 \\
+14 & 64QAM & 448 \\
+15 & 64QAM & 512 \\
+16 & 64QAM & 576 \\
+17 & 64QAM & 640 \\
+18 & 64QAM & 704 \\
+19 & 64QAM & 768 \\
+20 & 64QAM & 832 \\
+21 & 64QAM & 896 \\
+22 & 256QAM & 640 \\
+23 & 256QAM & 704 \\
+24 & 256QAM & 768 \\
+25 & 256QAM & 832 \\
+26 & 256QAM & 896 \\
+27 & 256QAM & 960 \\
+28 & 1024QAM & 768 \\
+29 & 1024QAM & 832 \\
+30 & 1024QAM & 896 \\
+31 & 1024QAM & 960 \\
+\end{longtable}
+
+\begin{longtable}{ccc}
+\caption{表 10 第二类数据信息传输调制编码方式表格 3，高速率} \\
+\toprule
+\textbf{调制编码索引} & \textbf{调制方式} & \textbf{编码速率 $(R) \times 1024$} \\
+\midrule
+\endfirsthead
+\multicolumn{3}{c}{\tablename\ \thetable\ （续）} \\
+\toprule
+\textbf{调制编码索引} & \textbf{调制方式} & \textbf{编码速率 $(R) \times 1024$} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+0 & QPSK & 96 \\
+1 & QPSK & 192 \\
+2 & QPSK & 320 \\
+3 & QPSK & 576 \\
+4 & 16QAM & 384 \\
+5 & 16QAM & 448 \\
+6 & 16QAM & 512 \\
+7 & 16QAM & 576 \\
+8 & 16QAM & 640 \\
+9 & 16QAM & 704 \\
+10 & 64QAM & 448 \\
+11 & 64QAM & 512 \\
+12 & 64QAM & 576 \\
+13 & 64QAM & 640 \\
+14 & 64QAM & 704 \\
+15 & 64QAM & 768 \\
+16 & 64QAM & 832 \\
+17 & 64QAM & 896 \\
+18 & 256QAM & 640 \\
+19 & 256QAM & 704 \\
+20 & 256QAM & 768 \\
+21 & 256QAM & 832 \\
+22 & 256QAM & 896 \\
+23 & 256QAM & 960 \\
+24 & 1024QAM & 768 \\
+25 & 1024QAM & 832 \\
+26 & 1024QAM & 896 \\
+27 & 1024QAM & 960 \\
+28 & 4096QAM & 768 \\
+29 & 4096QAM & 832 \\
+30 & 4096QAM & 896 \\
+31 & 4096QAM & 960 \\
+\end{longtable}
+
+对于上述三个表格，系统缺省使用表格 2。如高层信令进行了 MCS 表格的配置或重配置，则使用系统配置或者重配置的表格。
+
+\paragraph{TB 初传}
+
+如果调度数据传输的控制信息指示该次传输是 TB 的初传：
+
+信息比特长度 $A_{\mathrm{TBS}}$ 的计算方法如下：
+\begin{itemize}[nosep]
+  \item 计算初始信道比特序列数 $E_{\mathrm{tot}}$：$E_{\mathrm{tot}} = N_{\mathrm{RE}} \cdot Q_m \cdot \upsilon$，其中 $N_{\mathrm{RE}}$ 是调度的子载波数，$Q_m$ 是调制方式，$\upsilon$ 是传输流数。
+  \item 计算初始信息比特数 $N_{\mathrm{info}}$：$N_{\mathrm{info}} = E_{\mathrm{tot}} \cdot R$，其中 $R$ 是编码速率。
+  \item 计算量化初始信息比特数 $N_{\mathrm{info}}'$：
+  \begin{equation}
+  N_{\mathrm{info}}' = \max\left(24,\; 2^n \cdot \mathrm{round}\!\left(\frac{N_{\mathrm{info}} - 24}{2^n}\right)\right)
+  \end{equation}
+  其中 $n = \max\!\bigl(3,\; \lfloor \log_2(N_{\mathrm{info}} - 24) \rfloor - 5\bigr)$，其中 $\mathrm{round}$ 是就近取整数的运算。
+  \item 计算分段数 $C$：
+  \begin{equation}
+  C = \left\lfloor \frac{E_{\mathrm{tot}}}{N_m} \right\rfloor
+  \end{equation}
+  其中，$N_m$ 的值为 4096。如果 $\mod(E_{\mathrm{tot}}, N_m) \neq 0$ 且 $(R > \tfrac{7}{16} \;\|\; C < 9)$ 且 $(E_{\mathrm{tot}} - C \cdot N_m) \cdot R > T$，则 $C = C + 1$，否则 $C = \max(1, C)$；其中 $R$ 是调制编码索引指示的编码速率，$T$ 根据码率 $R$ 确定，如果 $R > \tfrac{2}{3}$ 则 $T = 192$；否则 $T = 384$。
+  \item 计算信息比特数 $A_{\mathrm{TBS}}$：
+  \begin{equation}
+  A_{\mathrm{TBS}} = 8 \cdot C \cdot \left\lceil \frac{N_{\mathrm{info}}' + 24}{8 \cdot C} \right\rceil - 24
+  \end{equation}
+\end{itemize}
+
+信息比特序列表示为 $a_0, a_1, a_2, a_3, \ldots, a_{A_{\mathrm{TBS}} - 1}$，根据本文件 6.5.1 节的处理方法，使用循环冗余校验生成多项式 $g_{\mathrm{CRC24A}}(D)$ 计算序列 $a_0, a_1, a_2, a_3, \ldots, a_{A_{\mathrm{TBS}} - 1}$ 的循环冗余校验比特 $p_0, p_1, p_2, p_3, \ldots, p_{L-1}$，并生成循环冗余校验后的输出比特序列 $b_0, b_1, b_2, b_3, \ldots, b_{A_{\mathrm{TBS}} + L - 1}$，其中 $L = 24$。
+
+信道比特序列长度 $E_{\mathrm{tot}}$，以及每个编码块分段对应的信道比特序列长度 $E_r$ 的计算方法如下，其中 $0 \leq r < C$，$C$ 是编码块分段的数量：
+\begin{itemize}[nosep]
+  \item 当 $C = 1$ 时，$E_0 = E_{\mathrm{tot}}$。
+  \item 当 $C > 1$ 时，每个编码块分段对应的信道比特序列长度 $E_r$ 为：$E_r = \lfloor E_{\mathrm{tot}} / C \rfloor$，其中 $0 \leq r < C$。
+\end{itemize}
+
+\paragraph{TB 重传}
+
+如果调度数据传输的控制信息指示该次传输是 TB 的重传：
+
+信道比特序列长度 $E_{\mathrm{tot}}$，以及每个编码块分段对应的信道比特序列长度 $E_r$ 的计算方法如下，其中 $0 \leq r < C$，$C$ 是第一次传输时码块分段的数量：
+\begin{itemize}[nosep]
+  \item 当 $C = 1$ 时，$E = E_{\mathrm{tot}}$。
+  \item 当 $C > 1$ 时，当 $C > 1$ 时，每个编码块分段对应的信道比特序列长度 $E_r$ 为：$E_r = \lfloor E_{\mathrm{tot}} / C \rfloor$，其中 $0 \leq r < C$。
+\end{itemize}
+
+\paragraph{基于 CBG 的重传}
+
+如果调度数据传输的控制信息指示该次传输是基于 CBG 的重传：
+
+信道比特序列长度 $E_{\mathrm{tot}}$，以及每个编码块分段对应的信道比特序列长度 $E_r$ 的计算方法如下，其中 $0 \leq r < C$，$C$ 是重传 CBG 包含的码块分段的数量：
+\begin{itemize}[nosep]
+  \item 当 $C = 1$ 时，$E = E_{\mathrm{tot}}$。
+  \item 当 $C > 1$ 时，每个编码块分段对应的信道比特序列长度 $E_r$ 为：$E_r = \lfloor E_{\mathrm{tot}} / C \rfloor$，其中 $0 \leq r < C$。
+\end{itemize}
+
+第二类数据信息传输使用本文件 6.2.6 规定的信道编码参数，进行 6.2.6.1.1、6.2.6.1.2、6.2.6.1.3 和 6.2.6.1.4 的极化编码，产生比特序列 $g_k$，其中 $k = 0, \ldots, \lfloor E_{\mathrm{tot}} / C \rfloor \cdot C - 1$。比特序列 $g_k$ 扩展为 $g^{\mathrm{E}}_k$，其中 $g^{\mathrm{E}}_k = g_k$，$k = 0, \ldots, \lfloor E_{\mathrm{tot}} / C \rfloor \cdot C - 1$，$k = \lfloor E_{\mathrm{tot}} / C \rfloor \cdot C, \ldots, E_{\mathrm{tot}}$ 时 $g^{\mathrm{E}}_k = 0$。将 $g^{\mathrm{E}}_k$ 根据本文件 6.5.7 节的方法产生比特加扰后的比特序列 $\tilde{g}_k$，根据本文件 6.5.6 节的方法将比特序列 $\tilde{g}_k$ 映射为调制符号序列 $d_i$。
+
+\subsubsection{6.2.5.3.3 多天线多流传输}
+
+调制后的符号可以通过多个空间流进行发送。多流发送时传输 1 个 TB。
+
+当重复指示信息指示的重复次数为 1 时，即不重复传输时，输入到空间流的符号序列为
+\begin{equation}
+s(i) = d(i), \quad i = 0, 1, \ldots, M_{\mathrm{symb}} - 1
+\end{equation}
+其中 $M_{\mathrm{symb}}$ 是频率域子载波个数。
+
+当空间流数为 1，重复指示信息指示的重复次数为为 $N$ 时，输入到空间流的符号序列为：
+\begin{equation}
+s(i) = d(\lfloor i/N \rfloor) \cdot \mathrm{DMRS}(i), \quad i = 0, 1, \ldots, M_{\mathrm{symb}}^{\mathrm{layer}} - 1
+\end{equation}
+其中 $M_{\mathrm{symb}}^{\mathrm{layer}}$ 是每一流的频率域子载波个数，$\mathrm{DMRS}(i)$ 是所在载波第一流对应的导频符号，当导频为梳齿配置时，该导频符号为梳齿组内的导频符号。
+
+当空间流数为 2，重复指示信息指示的重复次数为为 $N$ 时，输入到空间流的符号序列为，其中 $M_{\mathrm{symb}}^{\mathrm{layer}}$ 是每一流的频率域子载波个数：
+\begin{itemize}[nosep]
+  \item 对于第一流符号序列，$s(i) = d(i)$，$i = 0, 1, \ldots, M_{\mathrm{symb}}^{\mathrm{layer}} - 1$；
+  \item 对于第二流符号序列，$s(M_{\mathrm{symb}}^{\mathrm{layer}} + i) = d(M_{\mathrm{symb}}^{\mathrm{layer}} + \lfloor i/N \rfloor) \cdot \mathrm{DMRS}(i)$，$i = 0, 1, \ldots, M_{\mathrm{symb}}^{\mathrm{layer}} - 1$，
+\end{itemize}
+$\mathrm{DMRS}(i)$ 是所在载波第二流对应的导频符号，当导频为梳齿配置时，该导频符号为梳齿组内的导频符号。
+
+符号序列 $s(i)$ 先在第一流中，按照频率域子载波从小到大进行映射，然后在第二流中，按照频率域子载波从小到大进行映射，依次类推，完成所有流中所有频率域子载波的映射。
+
+对于每一个子载波，共映射 $V$ 个符号，表示为 $\upsilon(i)$，$i = 0, 1, \ldots, V - 1$，符号 $\upsilon(0), \ldots, \upsilon(V - 1)$ 到空间流 $x(i) = [x^{(0)}(i)\; x^{(1)}(i) \ldots x^{(V-1)}(i)]^{\mathsf T}$ 的映射根据下表 11 确定，其中 $i = 0, 1, \ldots, M_{\mathrm{symb}}^{\mathrm{layer}} - 1$，$V$ 是空间流数，$M_{\mathrm{symb}}^{\mathrm{layer}}$ 是每一流的频率域子载波个数。
+
+\begin{longtable}{cl}
+\caption{表 11 码字到空间流的映射方法} \\
+\toprule
+\textbf{空间层数} & \textbf{码字数 1：码字到空间层的映射 $i = 0, 1, \ldots, M_{\mathrm{symb}}^{\mathrm{layer}} - 1$} \\
+\midrule
+\endfirsthead
+\multicolumn{2}{c}{\tablename\ \thetable\ （续）} \\
+\toprule
+\textbf{空间层数} & \textbf{码字数 1：码字到空间层的映射 $i = 0, 1, \ldots, M_{\mathrm{symb}}^{\mathrm{layer}} - 1$} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+1 &
+$x^{(0)}(i) = \upsilon(0)$ \\
+2 &
+$x^{(0)}(i) = \upsilon(0)$;\quad $x^{(1)}(i) = \upsilon(1)$ \\
+3 &
+$x^{(0)}(i) = \upsilon(0)$;\quad $x^{(1)}(i) = \upsilon(1)$;\quad $x^{(2)}(i) = \upsilon(2)$ \\
+4 &
+$x^{(0)}(i) = \upsilon(0)$;\quad $x^{(1)}(i) = \upsilon(1)$;\quad $x^{(2)}(i) = \upsilon(2)$;\quad $x^{(3)}(i) = \upsilon(3)$ \\
+5 &
+$x^{(0)}(i) = \upsilon(0)$;\quad $x^{(1)}(i) = \upsilon(1)$;\quad $x^{(2)}(i) = \upsilon(2)$;\quad $x^{(3)}(i) = \upsilon(3)$;\quad $x^{(4)}(i) = \upsilon(4)$ \\
+6 &
+$x^{(0)}(i) = \upsilon(0)$;\quad $x^{(1)}(i) = \upsilon(1)$;\quad $x^{(2)}(i) = \upsilon(2)$;\quad $x^{(3)}(i) = \upsilon(3)$;\quad $x^{(4)}(i) = \upsilon(4)$;\quad $x^{(5)}(i) = \upsilon(5)$ \\
+7 &
+$x^{(0)}(i) = \upsilon(0)$;\quad $x^{(1)}(i) = \upsilon(1)$;\quad $x^{(2)}(i) = \upsilon(2)$;\quad $x^{(3)}(i) = \upsilon(3)$;\quad $x^{(4)}(i) = \upsilon(4)$;\quad $x^{(5)}(i) = \upsilon(5)$;\quad $x^{(6)}(i) = \upsilon(6)$ \\
+8 &
+$x^{(0)}(i) = \upsilon(0)$;\quad $x^{(1)}(i) = \upsilon(1)$;\quad $x^{(2)}(i) = \upsilon(2)$;\quad $x^{(3)}(i) = \upsilon(3)$;\quad $x^{(4)}(i) = \upsilon(4)$;\quad $x^{(5)}(i) = \upsilon(5)$;\quad $x^{(6)}(i) = \upsilon(6)$;\quad $x^{(7)}(i) = \upsilon(7)$ \\
+\end{longtable}
+
+空间流向量 $[x^{(0)}(i) \ldots x^{(\upsilon-1)}(i)]^{\mathsf T}$ 到端口数据的映射根据如下公式确定，其中 $i = 0, 1, \ldots, M_{\mathrm{symb}}^{\mathrm{layer}} - 1$：
+\begin{equation}
+\begin{bmatrix}
+y^{(0)}(i) \\ y^{(1)}(i) \\ \vdots \\ y^{(P-1)}(i)
+\end{bmatrix}
+=
+\begin{bmatrix}
+W_{0,0} & \cdots & W_{0,V-1} \\
+\vdots & \ddots & \vdots \\
+W_{P-1,0} & \cdots & W_{P-1,V-1}
+\end{bmatrix}
+\begin{bmatrix}
+x^{(0)}(i) \\ x^{(1)}(i) \\ \vdots \\ x^{(V-1)}(i)
+\end{bmatrix}
+\end{equation}
+
+\subsubsection{6.2.5.3.4 资源映射}
+
+每个端口上的符号向量 $y^{(p)}(0), \ldots, y^{(p)}(M_{\mathrm{symb}}^{\mathrm{ap}} - 1)$，按照索引从小到大的顺序，在被配置的资源上按照符号索引的先后顺序，以及每个符号中子载波索引的顺序依次映射到对应端口的各符号的子载波上。
+
+对于 G 链路和 T 链路，在被调度的时频资源中，除了映射 DMRS-D 的时频资源，其它时频资源都用于映射第一类数据信息。对于 G 链路，被调度的时频资源由调度信息指示的时频资源排除与开销资源重叠的部分得到。开销资源包括：同步信息块 SAB、G 链路物理层控制信息块 G-PCIB、映射广播信息的资源、映射 G 链路公共解调参考信号 G-DMRS-C 的资源、映射第二训练信号 STS 的资源。对于 T 链路，被调度的时频资源由调度信息指示的时频资源得到。
+
+对于直通链路，在被调度的时频资源中，除了映射 DMRS-D 的时频资源，其它时频资源都用于映射第一类数据信息。直通链路被调度的频域资源为同步块 SAB 所在的基础载波。
+
+对于附链路，映射第二类数据信息的资源见 6.2.5.4 节。
+
+\subsection{6.2.5.4 附链路物理层数据信息块 A-PDIB}
+
+附链路物理层数据信息块 A-PDIB 用于 T 节点映射同步信号、附链路物理层数据信息和对应的数据信息解调参考信号 DMRS-D。
+
+附链路物理层数据信息块 A-PDIB 的时频资源由 G 节点调度，支持预配置调度方式。附链路物理层数据信息块 A-PDIB 的频域资源由整数个基础载波组成。
+
+A-PDIB 的第一个符号映射 STS；A-PDIB 的第二个符号和第三个符号映射 FTS；从 A-PDIB 的第四个符号开始，T 节点按照配置的周期映射数据信息解调参考信号 DMRS-D；A-PDIB 的其它资源用于 T 节点映射附链路物理层数据信息。其中，STS 序列，$u = 1, 2, \ldots, 16$，为通信域第二训练信号标识，其值为通信域 G 节点标识最低 4 位对应的数值加 1；FTS 序列，$u = 1, 160$ 为通信域同步信息块第一训练信号标识，与符号类型对应，$u = 1$ 对应类型一 A、类型一 B 或类型四，$u = 160$ 对应类型二或类型三。
+
+未配置数据信息解调参考信号 DMRS-D 的时域周期时，初始时域周期等于一个无线帧的长度。
+
+%----------------------------------------------------------------------
+\section{两类数据对比表}
+%----------------------------------------------------------------------
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{3.2cm}p{5.5cm}p{5.5cm}}
+\toprule
+\textbf{对比项} & \textbf{第一类数据信息} & \textbf{第二类数据信息} \\
+\midrule
+调度方式 & 仅预配置调度 & 预配置 + 动态调度 \\
+信息比特长度 & $B = K \cdot N$（高层固定） & 初传按 $A_{\mathrm{TBS}}$ 公式；重传复用初传参数 \\
+CRC & CRC24A / CRC16 / CRC8（$L$ 可配） & 固定 CRC24A，$L=24$ \\
+MCS & 高层直接指示调制方式 & 表 8/9/10 + 调制编码索引 \\
+流数 & 单流（无 6.2.5.3.3） & 支持 $\upsilon$ 流、重复、层映射 \\
+$E_{\mathrm{tot}}$ & $N_{\mathrm{RE}} \cdot Q_m$ & $N_{\mathrm{RE}} \cdot Q_m \cdot \upsilon$ \\
+典型场景 & 确定性低时延采样/传感载荷 & 通用宽带数据、MIMO、HARQ \\
+G/T/D 映射 & 6.2.5.2.3 & 6.2.5.3.4（G/T 原文表述见标准） \\
+附链路 & 见 6.2.5.4 & 见 6.2.5.4 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%----------------------------------------------------------------------
+\section{共同处理步骤}
+%----------------------------------------------------------------------
+
+\begin{enumerate}[nosep]
+  \item 确定 $E_{\mathrm{tot}}$、码块分段数 $C$ 与各段 $E_r$（$N_m = 4096$，含 $T$ 门限判定）；
+  \item CRC 附加（6.5.1）$\rightarrow$ 比特序列 $b_k$；
+  \item 调用 6.2.6.1.1\textasciitilde 6.2.6.1.4：码块分段/CRC24B、极化编码、速率匹配、比特选择/交织 $\rightarrow$ $g_k$；
+  \item $g_k$ 零填充扩展至 $g^{\mathrm{E}}_k$（长度 $E_{\mathrm{tot}}$）；
+  \item 6.5.7 加扰 $\rightarrow$ $\tilde{g}_k$；6.5.6 调制 $\rightarrow$ $d_i$；
+  \item 排除 DMRS-D RE，按``符号序 $\times$ 子载波序''映射到调度 RE；
+  \item 与 DMRS-D 功率一致（6.2.3.6 / 6.5.4）。
+\end{enumerate}
+
+%----------------------------------------------------------------------
+\section{约束与实现要点}
+%----------------------------------------------------------------------
+
+\begin{enumerate}[nosep]
+  \item 第一类 $K$ 仅取标准枚举值；$N \geq 1$，多 TB 同 TTI 时各 TB 资源配置相同；
+  \item 第二类 MCS 缺省表 9；高层可切换表 8（高可靠）或表 10（高速率）；
+  \item $A_{\mathrm{TBS}}$ 量化步骤中 $n$、$\mathrm{round}$ 与 $C$ 分段须与初传严格一致，重传不得重算 $A_{\mathrm{TBS}}$；
+  \item CBG 重传时 $C$ 为\textbf{重传 CBG 所含码块数}，$E_r$ 按当前 $E_{\mathrm{tot}}$ 均分；
+  \item $g^{\mathrm{E}}_k$ 仅在 $k \geq \lfloor E_{\mathrm{tot}}/C \rfloor \cdot C$ 时填零，长度对齐 $E_{\mathrm{tot}}$；
+  \item 多流场景：重复次数 $N>1$ 时数据符号与 $\mathrm{DMRS}(i)$ 逐 RE 相乘；层数 1\textasciitilde 8 按表 11 一一映射；
+  \item G 链路调度资源须扣除 SAB、G-PCIB、广播、G-DMRS-C、STS 等开销 RE；
+  \item A-PDIB：符号 \#0=STS，\#1/\#2=FTS，\#3 起周期 DMRS-D，其余 RE 映射附链路数据；DMRS 缺省周期 = 1 无线帧；
+  \item 6.2.5.3.4 对 G/T 链路原文写``第一类数据信息''——实现时以链路类型及 6.2.5.2/6.2.5.3 上下文区分，勿与附链路第二类映射混淆。
+\end{enumerate}
+
+%----------------------------------------------------------------------
+\section{与标准其他章节的衔接}
+%----------------------------------------------------------------------
+
+\begin{itemize}[nosep]
+  \item \textbf{6.2.1}：物理层数据信息 2 类及 PIB 分类索引；
+  \item \textbf{6.2.2}：RE 网格、G/T/D/A 符号、基础载波与 TTI；
+  \item \textbf{6.2.3.6}：DMRS-D 序列、周期与 RE 占用；
+  \item \textbf{6.2.4}：预配置调度、DSCI、MCS/资源/HARQ/CBG 指示；
+  \item \textbf{6.2.6}：极化码编码、速率匹配、$\mathrm{rvid}$ 与重传比特选择；
+  \item \textbf{6.5.1/6.5.6/6.5.7}：CRC、调制映射、加扰初始化；
+  \item \textbf{6.2.9}：RE 复数值 $a_{k,l}^{(p)}$ 合成 OFDM 时域波形。
+\end{itemize}
+
+\vfill
+\begin{center}
+\small\textcolor{gray}{精确参数与字段定义以 T/XS 10001-2025 正式标准为准；本文档仅供 SLB 120\,kHz 物理层实现与联调参考。}
+\end{center}
+
+\end{document}
