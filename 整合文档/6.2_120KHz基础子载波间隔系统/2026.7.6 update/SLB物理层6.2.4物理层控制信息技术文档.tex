@@ -1,0 +1,801 @@
+% !TEX program = xelatex
+\documentclass[11pt,a4paper]{ctexart}
+
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{longtable}
+\usepackage{array}
+
+\geometry{left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm}
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue}
+
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+
+\title{%
+  \textbf{星闪 SLB 物理层}\\[0.4em]
+  \Large 6.2.4 物理层控制信息技术文档\\[0.3em]
+  \large SAB \textbullet\ RAB \textbullet\ G-PCIB \textbullet\ GCI \textbullet\ TCI \textbullet\ P-PCIB
+}
+\author{依据 T/XS 10001-2025《星闪无线通信系统 接入层\\
+同步低时延宽带空口 SLB 技术要求和测试方法》整理\\
+（团体标准 20250326 版）}
+\date{2026 年 7 月 6 日}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+%======================================================================
+\part{总览}
+%======================================================================
+
+\section{文档范围与模块划分}
+
+本文档对应 SLB 120\,kHz 物理层协议第 6.2.4 节``物理层控制信息''，涵盖 6.2.4.1\textasciitilde 6.2.4.10 全部子节，定义同步/广播/接入信息、G 链路控制信息 GCI、G-PCIB/P-PCIB 控制块及 T 链路控制信息 TCI 的\textbf{比特字段}、\textbf{信道编码与调制}、\textbf{资源映射}与\textbf{盲检规则}。
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{2.2cm}L{4.2cm}L{6.1cm}}
+\toprule
+\textbf{子节} & \textbf{内容} & \textbf{核心输出/行为} \\
+\midrule
+6.2.4.1 & 同步信息 & 通信域/直通链路 80\,bit 同步字段 \\
+6.2.4.2 & 同步信息块 SAB & STS/FTS/同步信息 RE 布局 \\
+6.2.4.3 & 广播信息 & 72\,bit 物理层配置参数 \\
+6.2.4.4 & 接入信息 & 80\,bit 随机接入/调度请求字段 \\
+6.2.4.5 & 接入信息块 RAB & T 节点接入块映射与退避 \\
+6.2.4.6 & G 链路控制信息 GCI & DSCI 等 7 类 GCI + 编码映射 \\
+6.2.4.7 & G-PCIB & CTU 聚合、盲检、表 7 \\
+6.2.4.8 & 直通动态调度 & 82\,bit 直通链路 DSCI \\
+6.2.4.9 & P-PCIB & 直通控制块符号与映射 \\
+6.2.4.10 & T 链路控制信息 TCI & HARQ/CQI/SR 反馈与映射 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{与相关章节的关系}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{2.2cm}L{2.2cm}L{9.1cm}}
+\toprule
+\textbf{相关节号} & \textbf{关系} & \textbf{说明} \\
+\midrule
+6.2.1 & 上游 & 17 类控制信息索引与 PIB 定义 \\
+6.2.2 & 上游 & RE 网格、TTI 长度、符号类型（\#3、\#5 等） \\
+6.2.3 & 平行 & SAB/RAB 内 FTS/STS；G/P/T-DMRS-C 与控制同 RE \\
+6.2.5 & 下游 & DSCI/预配置 GCI 调度第二类数据 TB \\
+6.2.6/6.5.1/6.5.6 & 上游 & 极化编码（$C{=}1$）、CRC、QPSK 调制 \\
+6.6/6.7 & 下游 & G/T 位置/感知测量资源指示触发测量 \\
+7.2.2/7.5.3 & 平行 & 随机接入/SR 流程与高层配置参数 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{PHY 控制面流水线}
+
+\begin{enumerate}[nosep]
+  \item \textbf{下行发现}（6.2.4.1/2/3）：G 节点 SAB 映射 STS/FTS/同步信息 $\rightarrow$ 周期广播（\#5、\#7）$\rightarrow$ 指示 NSymb-G-PCIB 与 GCI 组位图；
+  \item \textbf{接入}（6.2.4.4/5）：T 节点 RAB 映射 STS/FTS/接入信息 $\rightarrow$ 可选随路短数据（\#5、\#6）$\rightarrow$ 概率退避重传；
+  \item \textbf{G 侧调度}（6.2.4.6/7）：G 节点 G-PCIB 按 CTU 聚合映射 GCI $\rightarrow$ T 节点盲检公共/特定 GCI；
+  \item \textbf{数据闭环}（6.2.4.6.1 + 6.2.5）：DSCI 指示时频/MCS/HARQ $\rightarrow$ 6.2.5 映射数据 $\rightarrow$ T 节点反馈 TCI；
+  \item \textbf{上行反馈}（6.2.4.10）：TCI（序列或数据方式）与 T-DMRS-C 同梳齿映射 $\rightarrow$ G 节点解调 ACK/CQI/SR；
+  \item \textbf{直通链路}（6.2.4.1/8/9）：直通 SAB 指示 NCTU-PCI/NPCI $\rightarrow$ P-PCIB 映射直通 DSCI。
+\end{enumerate}
+
+\newpage
+%======================================================================
+\part{6.2.4 物理层控制信息（工程解读）}
+%======================================================================
+
+\section{协议章节对应}
+
+本节对应 T/XS 10001-2025 第 6.2.4 节，完整涵盖 6.2.4.1\textasciitilde 6.2.4.10.6。
+
+\section{功能定义}
+
+6.2.4 在 6.2.2 RE 网格上承载\textbf{不经过 MAC 复用的物理层控制比特}，支撑：
+\begin{enumerate}[nosep]
+  \item \textbf{网络发现与定时}：同步信息、SAB、广播信息（6.2.4.1\textasciitilde 3）；
+  \item \textbf{随机接入与资源请求}：接入信息、RAB（6.2.4.4/5）；
+  \item \textbf{G 节点调度与管理}：DSCI、预配置、DRX、载波切换、初始接入载波（6.2.4.6/7）；
+  \item \textbf{位置/感知资源配置}：G/T 位置测量信号资源指示（6.2.4.6.6/7）；
+  \item \textbf{T 节点闭环反馈}：HARQ、CQI、SR（6.2.4.10）；
+  \item \textbf{直通链路调度}：直通 DSCI、P-PCIB（6.2.4.8/9）。
+\end{enumerate}
+
+\section{模块边界（上下游及职责划分）}
+
+\subsection{上游模块}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{3.5cm}L{4cm}L{5.5cm}}
+\toprule
+\textbf{上游} & \textbf{输入} & \textbf{说明} \\
+\midrule
+6.2.2 帧结构 & 符号类型、$(k,l)$ 网格 & RE 坐标与 TTI 长度 \\
+6.2.3 物理层信号 & FTS/STS/DMRS 序列 & SAB/RAB/TCI 同块信号 \\
+高层 RRC/XRC & ACK 资源池、DRX、预配置 ID 等 & GCI/TCI 高层语义 \\
+6.2.6 信道编码 & $C{=}1$ 极化码参数 & 控制信息编码 \\
+6.5.1/6.5.6 & CRC 多项式、QPSK 调制 & 比特$\rightarrow$符号 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{下游模块}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{3.5cm}L{4cm}L{5.5cm}}
+\toprule
+\textbf{下游} & \textbf{输出} & \textbf{说明} \\
+\midrule
+6.2.5 数据信息 & DSCI/预配置指示的资源与 MCS & TB 调度 \\
+接收机盲检 & G-PCIB 上 CTU 候选 & GCI 解析 \\
+MAC HARQ & TCI ACK/NACK、CQI & 重传与链路自适应 \\
+7.2 媒体接入层 & 随机接入、SR 流程 & 7.2.2.1/7.2.2.2 \\
+6.6/6.7 测量 & 位置/感知资源指示 & PMS 时频配置 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{本模块不负责的内容}
+
+物理层数据 TB 比特语义与 MCS 表（6.2.5）、信号序列生成（6.2.3）、极化码内核（6.2.6 算法细节）、OFDM 合成（6.2.9）、射频指标（6.2.10/第 8 章）。
+
+\section{在 SLB 通信流程中的角色}
+
+6.2.4 处于 PHY \textbf{控制面承载层}：SAB 完成粗同步与系统参数广播 $\rightarrow$ RAB/G-PCIB 完成接入与调度 $\rightarrow$ 6.2.5 在 GCI 指示资源上映射数据 $\rightarrow$ TCI 闭合 HARQ/CQI 环路。直通场景下 P-PCIB 替代 G-PCIB 承担同类调度语义。
+
+%----------------------------------------------------------------------
+\section{关键参数与强制要求}
+%----------------------------------------------------------------------
+
+\subsection{通用编码与映射约定}
+
+\begin{table}[h]
+\centering
+\small
+\caption{控制信息通用处理（见 6.2.4.1.2 等）}
+\begin{tabular}{llll}
+\toprule
+\textbf{参数} & \textbf{取值} & \textbf{约束} & \textbf{条款} \\
+\midrule
+信道编码 & 6.2.6 极化码 & 多数控制信息 $C{=}1$ & 6.2.6.1 \\
+调制 & QPSK & 6.5.6；TCI 二级 HARQ 二级反馈见 6.2.4.10.5 & 6.5.6 \\
+比特顺序 & LSB$\rightarrow$MSB & CRC 位于最高位侧 & 6.1 \\
+散布映射顺序 & 先时后频 & 符号内低$\rightarrow$高子载波 & 6.2.4.1.3 等 \\
+CRC24B & $g_{\mathrm{CRC24B}}(D)$ & 同步/广播/接入/GCI 等 & 6.5.1 \\
+CRC16 & $g_{\mathrm{CRC16}}(D)$ & CQI/SR 等 & 6.5.1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{散布控制信息比特长度}
+
+\begin{table}[h]
+\centering
+\small
+\caption{散布类控制信息长度归纳}
+\begin{tabular}{lllll}
+\toprule
+\textbf{控制信息} & \textbf{有效 bit} & \textbf{预留 bit} & \textbf{CRC} & \textbf{总 bit} \\
+\midrule
+通信域同步信息 & 52 & 4 & CRC24 & 80 \\
+直通同步信息 & 55 & 4 & CRC24 & 80 \\
+广播信息 & 37 & 11 & CRC24 & 72 \\
+接入信息 & 56 & 0 & CRC24 & 80 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent 各类控制信息\textbf{逐字段比特表}见独立章节``控制信息比特字段全集''（比特表1--22）；本节仅保留索引与参数归纳。
+
+\subsection{信息格式指示速查}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{控制信息} & \textbf{格式指示取值} & \textbf{条款} \\
+\midrule
+通信域同步信息 & 0 & 6.2.4.1.1 \\
+直通同步信息 & 1 & 6.2.4.1.1 \\
+接入信息 & 2 & 6.2.4.4.1 \\
+DSCI（TB 模式） & 0 & 6.2.4.6.1 \\
+快速载波切换 & 2 & 6.2.4.6.4 \\
+初始接入载波 & 3 & 6.2.4.6.5 \\
+位置/感知资源指示 & 1（格式指示）；子格式 0/1/2/3 & 6.2.4.6.6 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{GCI 类型与长度}
+
+\begin{table}[h]
+\centering
+\small
+\caption{G 链路控制信息 GCI 类型归纳（见 6.2.4.6）}
+\begin{tabular}{L{4.5cm}lll}
+\toprule
+\textbf{GCI 类型} & \textbf{总 bit} & \textbf{CRC 加扰} & \textbf{条款} \\
+\midrule
+动态调度数据控制信息（TB） & 82 & 24\,bit Phy-ID & 6.2.4.6.1 \\
+动态调度数据控制信息（CBG） & 88 & 24\,bit Phy-ID & 6.2.4.6.1 \\
+动态调度数据控制信息（一级/二级） & 91 & 24\,bit Phy-ID & 6.2.4.6.1 \\
+预配置调度激活去激活 & 82 & \texttt{newphy-IDforPreConfig} 掩码 & 6.2.4.6.2 \\
+休眠与唤醒指示 & 82 & \texttt{wakeupMASK} 掩码 & 6.2.4.6.3 \\
+快速载波切换指示 & 82 & G-ID 或 T-ID & 6.2.4.6.4 \\
+初始接入载波指示 & 82 & G-ID & 6.2.4.6.5 \\
+G 链路位置/感知资源指示 & 82 & \texttt{positioningResourceIndicationMASK} 等 & 6.2.4.6.6 \\
+T 链路位置测量资源指示 & 85 & 测量组组播地址 Phy-ID & 6.2.4.6.7 \\
+直通链路 DSCI & 82 & 先发节点 Phy-ID & 6.2.4.8 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+公共 GCI 与 T 节点特定 GCI 的 CRC 加扰方式不同：特定 GCI 使用 T 节点 Phy-ID 加扰（见 6.2.4.6）。
+
+\subsection{DSCI 多格式对比}
+
+\begin{table}[h]
+\centering
+\small
+\caption{动态调度数据控制信息格式对比（见 6.2.4.6.1）}
+\begin{tabular}{L{3.8cm}lll}
+\toprule
+\textbf{格式} & \textbf{总 bit} & \textbf{触发条件} & \textbf{特有字段} \\
+\midrule
+TB + TB HARQ & 82 & 默认或 \texttt{schedMode}/\texttt{harqFeedBackMode} 为 TB 模式 & 格式指示=0；ACK 资源 3\,bit \\
+CBG + CBG HARQ & 88 & \texttt{schedMode} 配置 CBG 重传 & $X$\,bit CBG 重传位图（$X{=}2/4/8$） \\
+一级两级调度 & 91 & 两级 HARQ 或两级 T 链路调度 & GCI 格式=0；重传类型 2\,bit \\
+二级子 CBG 调度 & 91 & 一级 DSCI 重传类型=1 & GCI 格式=1；64\,bit 子 CBG 位图 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+符号起止指示的单位随 TTI 长度缩放：$\leq$1\,ms 按 1 符号；2/4/8\,ms TTI 分别按 2/4/8 符号为单位（见 6.2.4.6.1）。
+
+\subsection{G-PCIB 与 CTU 参数}
+
+\begin{table}[h]
+\centering
+\small
+\caption{G-PCIB 关键参数（见 6.2.4.7）}
+\begin{tabular}{lll}
+\toprule
+\textbf{参数} & \textbf{取值/规则} & \textbf{说明} \\
+\midrule
+NSymb-G-PCIB & $\{1,2,3,4,6,8,10,12\}$ & 广播信息 3\,bit 指示 \\
+每符号 CTU 数 & 2 & \#0--\#79、\#81--\#160 各 1 CTU \\
+聚合级别 $L$ & $\{1,2,4,8\}$ & 起始 CTU 索引 $i$ 须 $\mod(i,L){=}0$ \\
+特定 GCI 盲检资源 & $\leq 10$ 个 & 未配置则全表 7 初始级别 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\small
+\caption{表 7\quad NSymb-G-PCIB 与初始聚合级别（见 6.2.4.7）}
+\begin{tabular}{ccccc}
+\toprule
+NSymb-G-PCIB & 1 & 2、3 & 4、6 & 8、10、12 \\
+\midrule
+初始聚合级别 & 1、2 & 1、2、4 & 2、4、8 & 4、8 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{TCI 传输方式与长度}
+
+\begin{table}[h]
+\centering
+\small
+\caption{T 链路控制信息 TCI 归纳（见 6.2.4.10）}
+\begin{tabular}{L{3.5cm}lll}
+\toprule
+\textbf{TCI 类型} & \textbf{传输方式} & \textbf{有效 bit} & \textbf{CRC} \\
+\midrule
+单级 HARQ 反馈 & 序列或数据 & $N_1{+}N_2$ & 数据方式 +CRC24 \\
+两级 HARQ 一级 & 仅数据 & $N_{S1}$（=\texttt{firstStageBits}） & CRC24 \\
+两级 HARQ 二级 & 仅数据 & $N_{S2}$（=\texttt{secondStageBits}） & CRC24 \\
+CQI 反馈 & 仅数据 & $4N_{\mathrm{CH}}$ 或 $64N_{\mathrm{CH}}/L_{\mathrm{CH}}$ & CRC16 \\
+调度请求 SR & 仅数据 & 24 & CRC16 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+序列方式 TCI：梳齿上映射``1''$\rightarrow a_{k,l}{=}r_{n,l}(k)$，``0''$\rightarrow -r_{n,l}(k)$；$r_{n,l}(k)$ 为伪随机 QPSK 序列，生成方式见 6.5.3 节；须满足 $N \leq C(K_2{-}1)$（见 6.2.4.10.6）。
+
+%----------------------------------------------------------------------
+\section{控制信息比特字段全集}
+%----------------------------------------------------------------------
+
+\begin{table}[h]
+\centering
+\small
+\caption{控制信息比特字段总索引（LSB$\rightarrow$MSB）}
+\begin{tabular}{clll}
+\toprule
+\textbf{比特表} & \textbf{控制信息} & \textbf{总 bit} & \textbf{映射位置} \\
+\midrule
+1 & 通信域同步信息 & 80 & SAB \#3/\#4 \\
+2 & 直通链路同步信息 & 80 & SAB \#3/\#4 \\
+3 & 广播信息 & 72 & \#5/\#7 \\
+4 & 接入信息 & 80 & RAB \#3/\#4 \\
+5--8 & 动态调度 DSCI（4 格式） & 82/88/91/91 & G-PCIB \\
+9--12 & 预配置/DRX/载波切换/初始接入载波 & 82 & G-PCIB \\
+13--16 & G 位置/感知资源（子格式 0--3） & 82 & G-PCIB \\
+17 & T 链路位置测量资源 & 85 & G-PCIB \\
+18 & 直通链路 DSCI & 82 & P-PCIB \\
+19--22 & TCI：HARQ/CQI/SR & 变长/45 & TCI 散布 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\input{比特字段全集}
+
+%----------------------------------------------------------------------
+\section{本节核心详解（6.2.4.1\textasciitilde 6.2.4.10）}
+%----------------------------------------------------------------------
+
+\noindent 以下各子节采用统一结构：\textbf{功能} $\mid$ \textbf{比特字段} $\mid$ \textbf{编码调制} $\mid$ \textbf{资源映射} $\mid$ \textbf{工程要点}。比特明细均见上一节对应表格。
+
+\subsection{6.2.4.1 同步信息}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{2.2cm}L{10.8cm}}
+\toprule
+\textbf{项} & \textbf{说明} \\
+\midrule
+功能 & SAB \#3/\#4 承载同步控制比特；支撑搜网、GCI 盲检范围、直通 P-PCIB 规模 \\
+比特字段 & 通信域：\textbf{比特表1}；直通链路：\textbf{比特表2} \\
+编码调制 & 6.2.6 极化编码 $\rightarrow$ 6.5.6 QPSK \\
+资源映射 & 无线帧 \#3、\#4；先时后频，符号内低$\rightarrow$高子载波 \\
+工程要点 & GCI 位图（比特表1 字段\,6）决定盲检范围；广播存在性联动比特表3；NCTU/NPCI 联动比特表18/6.2.4.9 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{6.2.4.2 同步信息块 SAB}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{2.2cm}L{10.8cm}}
+\toprule
+\textbf{项} & \textbf{说明} \\
+\midrule
+功能 & PIB 容器；绑定 FTS/STS 与同步比特（比特表1 或比特表2） \\
+比特字段 & \#3/\#4 承载比特表1/比特表2；\#0 STS、\#1--\#2 FTS 无控制比特 \\
+编码调制 & 同步比特部分同 6.2.4.1；FTS/STS 见 6.2.3.1 \\
+资源映射 & 周期 $\{2,4,8\}$\,ms；\#0--\#4 为 SAB 资源；见下表 \\
+工程要点 & 无 SAB 载波仅映射 STS；FTS $u$：通信域 1/160，直通 159，RAB 为 2 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\small
+\caption{SAB 符号布局与同步比特格式对照}
+\begin{tabular}{L{3cm}lllL{2.8cm}}
+\toprule
+\textbf{场景} & \textbf{\#0} & \textbf{\#1--\#2} & \textbf{\#3--\#4} & \textbf{比特表} \\
+\midrule
+通信域 SAB & STS & FTS & 通信域同步信息 & 比特表1 \\
+直通 SAB & STS & FTS & 直通同步信息 & 比特表2 \\
+无 SAB 载波 & STS & --- & --- & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{6.2.4.3 广播信息}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{2.2cm}L{10.8cm}}
+\toprule
+\textbf{项} & \textbf{说明} \\
+\midrule
+功能 & 周期广播物理层配置；输出 NSymb-G-PCIB 与 G-PCIB 位置规则 \\
+比特字段 & \textbf{比特表3}（72\,bit，有效 37 + 预留 11 + CRC24） \\
+编码调制 & 6.2.6 极化 $\rightarrow$ 6.5.6 QPSK \\
+资源映射 & 8\,ms 周期；符号 \#5、\#7；先时后频 \\
+工程要点 & 字段 NSymb-G-PCIB 决定 G-PCIB 符号数；见下表 G-PCIB 位置 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\small
+\caption{NSymb-G-PCIB 与 G-PCIB 符号位置}
+\begin{tabular}{ll}
+\toprule
+\textbf{TTI 类型} & \textbf{G-PCIB 符号} \\
+\midrule
+含 SAB + 广播 & 从 \#8 起连续 NSymb 个 \\
+含 SAB、无广播，NSymb$>1$ & \#5 + 从 \#7 起 NSymb$-1$ 个 \\
+含 SAB、无广播，NSymb$=1$ & 仅 \#5 \\
+其它 TTI & 从 \#1 起连续 NSymb 个 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{6.2.4.4 接入信息}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{2.2cm}L{10.8cm}}
+\toprule
+\textbf{项} & \textbf{说明} \\
+\midrule
+功能 & RAB 内承载 T 节点接入意图 \\
+比特字段 & \textbf{比特表4}（80\,bit） \\
+编码调制 & 同 6.2.4.1：极化 + QPSK \\
+资源映射 & RAB 符号 \#3、\#4 \\
+工程要点 & 接入目的=4 时 RAB 扩展 \#5/\#6 随路短数据（48+CRC24） \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{6.2.4.5 接入信息块 RAB}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{2.2cm}L{10.8cm}}
+\toprule
+\textbf{项} & \textbf{说明} \\
+\midrule
+功能 & PIB 容器；T 节点上行映射接入控制 \\
+比特字段 & \#3/\#4：比特表4；可选 \#5/\#6：随路短数据 \\
+编码调制 & 接入信息同 6.2.4.4；短数据极化+QPSK \\
+资源映射 & \#0 STS，\#1--\#2 FTS（$u{=}2$），\#3--\#4 接入信息 \\
+工程要点 & 退避概率 $P$：初始 1，无响应减半，有响应复位；无上行定时用下行定时 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{6.2.4.6 G 链路控制信息 GCI}
+
+\begin{table}[h]
+\centering
+\small
+\caption{GCI 类型与比特字段表对照}
+\begin{tabular}{L{4.8cm}L{2cm}L{4.2cm}}
+\toprule
+\textbf{GCI 类型} & \textbf{子节} & \textbf{比特表} \\
+\midrule
+动态调度 DSCI（TB） & 6.2.4.6.1 & 比特表5 \\
+动态调度 DSCI（CBG） & 6.2.4.6.1 & 比特表6 \\
+动态调度 DSCI（一级） & 6.2.4.6.1 & 比特表7 \\
+动态调度 DSCI（二级） & 6.2.4.6.1 & 比特表8 \\
+预配置调度激活去激活 & 6.2.4.6.2 & 比特表9 \\
+休眠与唤醒指示 & 6.2.4.6.3 & 比特表10 \\
+快速载波切换指示 & 6.2.4.6.4 & 比特表11 \\
+初始接入载波指示 & 6.2.4.6.5 & 比特表12 \\
+位置/感知资源（子格式 0--3） & 6.2.4.6.6 & 比特表13--16 \\
+T 链路位置测量资源指示 & 6.2.4.6.7 & 比特表17 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{2.2cm}L{10.8cm}}
+\toprule
+\textbf{项} & \textbf{说明} \\
+\midrule
+功能 & G-PCIB CTU 内承载 G 侧控制；盲检后驱动调度/功耗/载波/测量 \\
+编码调制 & $C{=}1$ 极化（6.2.6.1.2--1.4）$\rightarrow$ QPSK；$L$ CTU 聚合映射 \\
+资源映射 & CTU 内先低$\rightarrow$高子载波，再按时间；$\mod(i,L){=}0$ \\
+工程要点 & 公共/特定 GCI CRC 加扰不同；DSCI 多格式互斥；广播调度 ACK/TCI 字段无效 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{6.2.4.7 G 链路物理层控制信息块 G-PCIB}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{2.2cm}L{10.8cm}}
+\toprule
+\textbf{项} & \textbf{说明} \\
+\midrule
+功能 & G 节点映射全部 GCI 的 PIB 容器 \\
+比特字段 & 承载比特表5--17 各类 GCI（非独立比特格式） \\
+编码调制 & 同 6.2.4.6.8 \\
+资源映射 & NSymb 与位置由比特表3 决定；每符号 2 CTU \\
+工程要点 & 盲检须执行全部配置；初始聚合级别见标准表\,7；特定 GCI 盲检资源 $\leq 10$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{6.2.4.8 直通链路动态调度数据控制信息}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{2.2cm}L{10.8cm}}
+\toprule
+\textbf{项} & \textbf{说明} \\
+\midrule
+功能 & 直通链路数据调度 \\
+比特字段 & \textbf{比特表18}（82\,bit） \\
+编码调制 & 6.2.6 第二类数据极化（含 6.2.6.1.1）$\rightarrow$ QPSK \\
+资源映射 & P-PCIB；$L$ CTU 聚合，先频后时 \\
+工程要点 & NCTU-PCI、NPCI 由比特表2 指示 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{6.2.4.9 直通链路物理层控制信息块 P-PCIB}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{2.2cm}L{10.8cm}}
+\toprule
+\textbf{项} & \textbf{说明} \\
+\midrule
+功能 & 直通先发节点映射 NPCI 个比特表18 DSCI \\
+比特字段 & 承载比特表18（$\times$ NPCI） \\
+编码调制 & 同 6.2.4.8 \\
+资源映射 & $N_{\mathrm{Symb-P-PCIB}}=N_{\mathrm{CTU-PCI}}\times\lceil N_{\mathrm{PCI}}/2\rceil$；\#5 起 \\
+工程要点 & NPCI 个 DSCI 先频后时依次映射 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{6.2.4.10 T 链路控制信息 TCI}
+
+\begin{table}[h]
+\centering
+\small
+\caption{TCI 类型与比特字段表对照}
+\begin{tabular}{L{3.5cm}L{2.5cm}L{4cm}}
+\toprule
+\textbf{TCI 类型} & \textbf{子节} & \textbf{比特表} \\
+\midrule
+单级 HARQ 反馈 & 6.2.4.10.1 & 比特表19 \\
+两级 HARQ 反馈 & 6.2.4.10.2 & 比特表20 \\
+CQI 反馈 & 6.2.4.10.3 & 比特表21 \\
+调度请求 SR & 6.2.4.10.4 & 比特表22 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{2.2cm}L{10.8cm}}
+\toprule
+\textbf{项} & \textbf{说明} \\
+\midrule
+功能 & T 节点上行 HARQ/CQI/SR 反馈 \\
+编码调制 & 数据方式：$C{=}1$ 极化+QPSK；二级 HARQ 二级见 6.2.4.10.5 \\
+资源映射 & 首符号 T-DMRS-C；其余符号 TCI；与 DSCI/预配置 TCI 载波字段联动 \\
+工程要点 & 序列方式单级 HARQ：$\pm r_{n,l}(k)$（6.5.3）；power boosting 反比于占用子载波 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%----------------------------------------------------------------------
+\section{17 类控制信息对照表（6.2.1 索引 $\rightarrow$ 6.2.4 条款）}
+%----------------------------------------------------------------------
+
+\begin{longtable}{L{3.8cm}L{1.8cm}L{2cm}L{1.5cm}L{3.2cm}}
+\caption{物理层 17 类控制信息与 6.2.4 子节对应} \\
+\toprule
+\textbf{控制信息} & \textbf{子节} & \textbf{长度} & \textbf{比特表} & \textbf{PIB/散布} \\
+\midrule
+\endfirsthead
+\multicolumn{5}{c}{\tablename\ \thetable\ （续）} \\
+\toprule
+\textbf{控制信息} & \textbf{子节} & \textbf{长度} & \textbf{比特表} & \textbf{PIB} \\
+\midrule
+\endhead
+同步信息 & 6.2.4.1 & 80 & 1/2 & SAB（\#3、\#4） \\
+广播信息 & 6.2.4.3 & 72 & 3 & 散布（\#5、\#7） \\
+接入信息 & 6.2.4.4 & 80 & 4 & RAB（\#3、\#4） \\
+动态调度数据控制信息 & 6.2.4.6.1 & 82/88/91 & 5--8 & G-PCIB \\
+预配置调度激活去激活信息 & 6.2.4.6.2 & 82 & 9 & G-PCIB \\
+休眠与唤醒指示信息 & 6.2.4.6.3 & 82 & 10 & G-PCIB \\
+快速载波切换指示信息 & 6.2.4.6.4 & 82 & 11 & G-PCIB \\
+初始接入载波指示信息 & 6.2.4.6.5 & 82 & 12 & G-PCIB \\
+G 链路位置/感知测量信号资源指示 & 6.2.4.6.6 & 82 & 13--16 & G-PCIB \\
+T 链路位置测量信号资源指示 & 6.2.4.6.7 & 85 & 17 & G-PCIB \\
+直通链路动态调度数据控制信息 & 6.2.4.8 & 82 & 18 & P-PCIB \\
+单级 HARQ 反馈信息 & 6.2.4.10.1 & 变长 & 19 & TCI 散布 \\
+两级 HARQ 反馈信息 & 6.2.4.10.2 & 变长 & 20 & TCI 散布 \\
+CQI 反馈信息 & 6.2.4.10.3 & 变长 & 21 & TCI 散布 \\
+调度请求信息 & 6.2.4.10.4 & 45 & 22 & TCI 散布 \\
+\bottomrule
+\end{longtable}
+
+\noindent 注：SAB（6.2.4.2）、RAB（6.2.4.5）、G-PCIB（6.2.4.7）、P-PCIB（6.2.4.9）为 PIB 容器，本身不单独计入 17 类控制信息清单。
+
+%----------------------------------------------------------------------
+\section{PIB 映射关系}
+%----------------------------------------------------------------------
+
+\begin{table}[h]
+\centering
+\footnotesize
+\begin{tabular}{L{2cm}L{1.8cm}L{5.5cm}L{3.7cm}}
+\toprule
+\textbf{PIB} & \textbf{符号} & \textbf{块内控制/信号内容} & \textbf{关联子节} \\
+\midrule
+SAB（通信域） & \#0--\#4 & STS、FTS、通信域同步信息 & 6.2.4.1、6.2.4.2 \\
+SAB（直通） & \#0--\#4 & STS、FTS、直通同步信息 & 6.2.4.1、6.2.4.2 \\
+---（广播） & \#5、\#7 & 广播信息（散布） & 6.2.4.3 \\
+RAB & \#0--\#4（+可选 \#5、\#6） & STS、FTS、接入信息、随路短数据 & 6.2.4.4、6.2.4.5 \\
+G-PCIB & 见 NSymb 规则 & GCI（DSCI/预配置/DRX/载波/定位等） & 6.2.4.6、6.2.4.7 \\
+P-PCIB & \#5 起 & 直通 DSCI $\times$ NPCI & 6.2.4.8、6.2.4.9 \\
+TCI & 高层配置符号 & HARQ/CQI/SR + T-DMRS-C & 6.2.4.10 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\small
+\caption{SAB/RAB 内 FTS $u$ 取值速查（与 6.2.3/6.2.4 衔接）}
+\begin{tabular}{llll}
+\toprule
+\textbf{场景} & \textbf{STS $u$} & \textbf{FTS $u$} & \textbf{控制信息} \\
+\midrule
+通信域 SAB & G-ID 低 4 位 $+1$ & 1 或 160（符号类型） & 通信域同步信息 \\
+直通 SAB & 先发 ID 低 4 位 $+1$ & 159 & 直通同步信息 \\
+RAB 接入 & G-ID 低 4 位 $+1$ & 2 & 接入信息 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%----------------------------------------------------------------------
+\section{数据类型、长度与维度}
+%----------------------------------------------------------------------
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{对象/字段} & \textbf{位宽或长度} & \textbf{映射/上下文} & \textbf{条款} \\
+\midrule
+通信域同步信息 & 80 bit（52+4+CRC24） & SAB \#3、\#4；格式=0 & 6.2.4.1.1 \\
+直通同步信息 & 80 bit（55+预留+CRC24） & SAB \#3、\#4；格式=1 & 6.2.4.1.1 \\
+同步信息 GCI 位图 & 8 bit & 通信域同步信息 bit 41--48 & 6.2.4.1.1 \\
+同步信息 NCTU/NPCI & 2+2 bit & 直通同步信息 bit 51--54 & 6.2.4.1.1 \\
+同步/接入信息 RE & 2 符号（\#3、\#4） & 散布，先时后频 & 6.2.4.1/4 \\
+广播信息 RE & 2 符号（\#5、\#7） & 8\,ms 周期 & 6.2.4.3 \\
+SAB/RAB 块 RE & 5 符号（\#0--\#4） & 含 FTS/STS & 6.2.4.2/5 \\
+G-PCIB CTU & 2 CTU/符号 & \#0--\#79、\#81--\#160 & 6.2.4.7 \\
+GCI 聚合级别 & $L\in\{1,2,4,8\}$ & $\mod(i,L){=}0$ & 6.2.4.7 \\
+DSCI 频域位图 & 16 bit & 工作子载波组 & 6.2.4.6.1 \\
+TCI 序列承载 & $N\leq C(K_2{-}1)$ & 梳齿$\times$符号 & 6.2.4.10.6 \\
+随路短数据 & 48+CRC24 & RAB \#5、\#6 & 6.2.4.5 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%----------------------------------------------------------------------
+\section{时序关系与触发条件}
+%----------------------------------------------------------------------
+
+\begin{enumerate}[nosep]
+  \item \textbf{SAB}：周期 $\{2,4,8\}$\,ms；非连续 COT 内从首帧至结束；
+  \item \textbf{广播信息}：8\,ms 周期；同步信息``广播存在''=1 时同 TTI 发送；
+  \item \textbf{RAB}：连续模式由系统消息配置；非连续 COT 末帧可选；
+  \item \textbf{G-PCIB}：每含 SAB 载波每 TTI 出现；NSymb 与位置由广播信息决定；
+  \item \textbf{GCI 盲检}：每 TTI 执行；公共/特定范围由同步信息 8\,bit GCI 位图限定；
+  \item \textbf{DSCI}：事件触发（G 节点调度）；TCI 在指示 TTI 或之后 TTI 反馈；
+  \item \textbf{预配置调度}：GCI 激活触发；非连续 COT 结束自动去激活；
+  \item \textbf{初始接入载波指示}：每含 RAB 载波、每 SAB 周期内至少 1 TTI；
+  \item \textbf{位置/感知资源}：GCI 指示当前 TTI 测距符号资源；
+  \item \textbf{TCI/SR}：DSCI/预配置或高层 SR 资源池触发；CQI 可周期多次（COT 内）。
+\end{enumerate}
+
+%----------------------------------------------------------------------
+\section{处理步骤}
+%----------------------------------------------------------------------
+
+\subsection{发送侧：散布控制信息（同步/广播/接入）}
+
+\textbf{Step 1}：组装比特字段（LSB$\rightarrow$MSB），计算 CRC24B。
+
+\textbf{Step 2}：6.2.6 极化编码 $\rightarrow$ 6.5.6 QPSK 得 $d_i$。
+
+\textbf{Step 3}：按子节映射到指定符号（\#3/\#4、\#5/\#7 等），符号内低$\rightarrow$高子载波。
+
+\subsection{发送侧：GCI（G-PCIB）}
+
+\textbf{Step 1}：选择 GCI 类型与格式（DSCI 多格式互斥由高层决定）。
+
+\textbf{Step 2}：组装字段，CRC24B + 对应掩码/Phy-ID 加扰。
+
+\textbf{Step 3}：$C{=}1$ 极化编码 $\rightarrow$ QPSK；按聚合级别 $L$ 占用连续 $L$ 个 CTU。
+
+\textbf{Step 4}：在 G-PCIB 符号内先低$\rightarrow$高子载波、再按时间写入 CTU。
+
+\subsection{接收侧：G-PCIB 盲检与解析}
+
+\textbf{Step 1}：读同步信息 GCI 位图，确定公共/特定 GCI 盲检范围。
+
+\textbf{Step 2}：按表 7 初始聚合级别枚举 CTU 候选（$\mod(i,L){=}0$）。
+
+\textbf{Step 3}：极化解码 + CRC 校验（公共/特定加扰方式不同）。
+
+\textbf{Step 4}：按格式指示分发至 DSCI/预配置/DRX/载波/定位等处理；驱动 6.2.5 或 6.6/6.7。
+
+\subsection{发送/接收侧：TCI}
+
+\textbf{Step 1}：解析 DSCI/预配置中 TCI 载波序号与 ACK 资源池索引。
+
+\textbf{Step 2}：按 \texttt{DedicatedTimeResource} 确定 $K_1,K_2$（及两级 HARQ 的 $K_3$）。
+
+\textbf{Step 3}：首符号映射 T-DMRS-C；序列方式在梳齿上映射 $\pm r_{n,l}(k)$（见 6.5.3）；数据方式映射 $d_i$。
+
+\textbf{Step 4}：接收侧按同规则解调，输出 ACK/CQI/SR 至 MAC。
+
+%----------------------------------------------------------------------
+\section{约束与实现要点}
+%----------------------------------------------------------------------
+
+\begin{enumerate}[nosep]
+  \item \textbf{比特顺序}：所有控制信息字段从 LSB 到 MSB 排列，CRC 位于最高位侧。
+  \item \textbf{信息格式指示}：通信域同步=0，直通同步=1，接入=2；GCI 各类型另有格式指示。
+  \item \textbf{G-PCIB 盲检}：起始 CTU 索引 $i$ 须满足 $\mod(i,L)=0$；表 7 限定 NSymb 与初始聚合级别组合。
+  \item \textbf{公共/特定 GCI}：同步信息 8\,bit GCI 位图指示本载波公共 GCI 与各 T 节点组 GCI；特定 GCI CRC 用 T 节点 Phy-ID 加扰。
+  \item \textbf{DSCI 多格式}：TB（82\,bit）、CBG（88\,bit）、两级（91\,bit$\times$2）互斥；XRC 重配置须更新 Phy-ID。
+  \item \textbf{预配置调度}：非连续模式 COT 结束自动去激活；激活/去激活 ID 字段互斥指示未配置 ID。
+  \item \textbf{接入退避}：RAB 与 SR 均使用概率 $P$ 半衰退避（初始 $P=1$，无响应减半，有响应复位）。
+  \item \textbf{TCI 传输方式}：单级 HARQ 支持序列/数据两种方式；两级 HARQ/CQI/SR 仅数据方式；序列方式须满足 $N \leq C(K_2-1)$。
+  \item \textbf{TCI 功率}：T-DMRS-C 与 TCI 同梳齿，按占用有效子载波比例反比 power boosting。
+  \item \textbf{直通 P-PCIB}：$N_{\mathrm{Symb-P-PCIB}} = N_{\mathrm{CTU-PCI}} \times \lceil N_{\mathrm{PCI}}/2 \rceil$；NPCI 个 DSCI 先频后时映射。
+  \item \textbf{广播 NSymb-G-PCIB}：广播信息 3\,bit 字段同时决定 G-PCIB 符号数与位置，须与 6.2.4.7 规则一致。
+  \item \textbf{位置测量格式}：6.2.4.6.6 子格式 0/1/2/3 对应四种子格式；格式 3 掩码为测量组组播地址。
+\end{enumerate}
+
+%----------------------------------------------------------------------
+\section{与标准其他章节的衔接}
+%----------------------------------------------------------------------
+
+\begin{itemize}[nosep]
+  \item \textbf{6.2.1}：17 类控制信息分类索引与 PIB 定义，6.2.4 为各类字段的规范来源；
+  \item \textbf{6.2.2}：RE 网格、TTI 长度、符号类型；广播/同步/接入的符号索引均引用 6.2.2；
+  \item \textbf{6.2.3}：SAB/RAB 内 FTS/STS 序列；G-DMRS-C/P-DMRS-C/T-DMRS-C 与控制 RE 绑定；
+  \item \textbf{6.2.5}：DSCI/预配置 GCI 调度第二类数据；调度资源须扣除 G-PCIB/SAB/广播等开销 RE；
+  \item \textbf{6.2.6/6.5.1/6.5.6}：控制信息极化编码（$C=1$）、CRC24B/CRC16、QPSK 调制；
+  \item \textbf{6.6/6.7}：G/T 位置测量信号资源指示触发 PMS/测量报告流程；
+  \item \textbf{7.2.2.1/7.2.2.2}：随机接入（RAB/接入信息）与资源请求（SR/接入信息）媒体接入层流程；
+  \item \textbf{7.5.3}：ACK 资源池、SR-Config、CQI-Conf、ControlResource 等高层参数与 6.2.4 字段对应；
+  \item \textbf{第 8.3 节}：初始接入信道定义，与 6.2.4.6.5 初始接入载波指示配合。
+\end{itemize}
+
+\vfill
+\begin{center}
+\small\textcolor{gray}{字段级定义与完整参数以 T/XS 10001-2025 第 6.2.4 节及关联 6.x.x 节为准；本文档提供物理层控制信息的工程解读，供 SLB 120\,kHz 实现与联调参考。}
+\end{center}
+
+\end{document}

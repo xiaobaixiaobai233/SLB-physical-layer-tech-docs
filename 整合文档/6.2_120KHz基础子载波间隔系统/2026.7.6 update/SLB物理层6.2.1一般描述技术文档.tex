@@ -1,0 +1,520 @@
+% !TEX program = xelatex
+\documentclass[11pt,a4paper]{ctexart}
+
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{longtable}
+\usepackage{array}
+
+\geometry{left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm}
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue}
+
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+
+\title{%
+  \textbf{星闪 SLB 物理层}\\[0.4em]
+  \Large 6.2.1 一般描述技术文档\\[0.3em]
+  \large 120\,kHz 内容分类 \textbullet\ 物理层信号上下文 \textbullet\ PIB 与两域结构
+}
+\author{依据 T/XS 10001-2025《星闪无线通信系统 接入层\\
+同步低时延宽带空口 SLB 技术要求和测试方法》整理\\
+（团体标准 20250326 版）}
+\date{2026 年 7 月 6 日}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+%======================================================================
+\part{总览}
+%======================================================================
+
+\section{文档范围与模块划分}
+
+本文档对应 SLB 120\,kHz 物理层协议第 6.2.1 节``一般描述''。该节在 6.1 物理层通用服务与 6.2.2 帧结构坐标系之上，\textbf{枚举 120\,kHz 子载波间隔系统空口传输的全部物理层内容类别}，并规定通信域与直通链路下\textbf{物理层信息块（PIB）}的组成边界。本文档为后续 6.2.2\textasciitilde 6.2.10 各子节的工程实现与联调提供统一索引。
+
+6.2.1 本身不规定波形参数、帧结构或编码算法，而是定义三类内容集合（信号、控制信息、数据信息）及其在 PIB 中的打包方式。
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{3.2cm}L{4.8cm}L{5.5cm}}
+\toprule
+\textbf{逻辑子模块} & \textbf{子模块主题} & \textbf{核心输出/行为} \\
+\midrule
+6.2.1（信号） & 8 类物理层信号枚举 & 不承载高层比特的辅助波形分类；指向 6.2.3 波形实现 \\
+6.2.1（控制） & 17 类物理层控制信息枚举 & 承载高层控制比特的分类；指向 6.2.4 字段定义 \\
+6.2.1（数据） & 2 类物理层数据信息枚举 & 承载用户/信令载荷的分类；指向 6.2.5 处理流水线 \\
+6.2.1（PIB） & 通信域 4 块 / 直通 2 块 & 信号+控制+数据的时频打包规则；定义散布资源与空闲 RE \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{与相关章节的关系}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{2.2cm}L{2.2cm}L{9.1cm}}
+\toprule
+\textbf{相关节号} & \textbf{关系} & \textbf{说明} \\
+\midrule
+6.1 & 上游 & 物理层通用服务、G/T/附/直通链路命名、$T_s$/$f_s$ 与比特序约定 \\
+6.2.2 & 上游 & 超帧/无线帧、RE 网格 $(k,l)$、五种 CP-OFDM 符号类型；提供``所在位置''坐标系 \\
+6.2.3 & 下游 & 8 类信号的序列生成、RE 映射与功率（6.2.3.1\textasciitilde 10） \\
+6.2.4 & 下游 & 17 类控制的比特字段、PIB 内布局与盲检规则 \\
+6.2.5 & 下游 & 第一/二类数据的 TB 流水线、MCS 与 RE 映射 \\
+6.2.6/6.5 & 下游 & 极化码/CRC/调制等跨模块基础能力 \\
+6.2.7/6.2.8 & 下游 & SAB 盲检、FTS 捕获等系统流程，依赖本节内容分类 \\
+6.3 & 平行 & 灵活带宽下相同内容分类的 $\alpha$ 参数缩放 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{120\,kHz 系统定位与基本参数量}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{概念} & \textbf{说明} & \textbf{标准条款} \\
+\midrule
+子载波间隔 & $\Delta f = f_s/256 = 120$\,kHz，$f_s = 30.72$\,MHz & 6.2.2.1 \\
+资源元素 RE & 时频网格最小映射单位 $(k,l)$，$a_{80,l}\equiv 0$ & 6.2.2.7 \\
+三类内容 & 信号（不承载高层比特）、控制（控制面）、数据（用户面/信令） & 6.1、6.2.1 \\
+PIB 定义 & 为实现特定功能，映射多种信号/控制/数据组合的 RE 集合 & 6.2.1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\newpage
+%======================================================================
+\part{6.2.1 一般描述（工程解读）}
+%======================================================================
+
+\section{协议章节对应}
+
+本节对应 T/XS 10001-2025 第 6.2 章第 6.2.1 节``一般描述''，涵盖：
+\begin{itemize}[nosep]
+  \item 8 类物理层信号；
+  \item 17 类物理层控制信息；
+  \item 2 类物理层数据信息；
+  \item 通信域与直通链路 PIB 定义及散布资源枚举。
+\end{itemize}
+波形级实现分别见 6.2.3\textasciitilde 6.2.5；6.2.1 无独立编号子节。
+
+\section{功能定义}
+
+6.2.1 建立物理层\textbf{分类体系}与\textbf{信息块打包规则}，使接收端能够：
+\begin{enumerate}[nosep]
+  \item \textbf{分类识别}：区分 RE 上承载的是信号、控制还是数据；
+  \item \textbf{块边界判定}：按 PIB 类型（SAB/RAB/G-PCIB/P-PCIB/A-PDIB）确定块边界与解码入口；
+  \item \textbf{域类型区分}：识别通信域（经 G 节点，含 G/T/附链路）与直通链路（设备直连）的资源组织差异；
+  \item \textbf{链路前缀解析}：按 G/T/附/直通链路前缀理解同名信号/控制在不同链路上的发送方向；
+  \item \textbf{索引下游条款}：将每类内容映射至 6.2.3/6.2.4/6.2.5 的具体实现子节。
+\end{enumerate}
+
+\section{模块边界（上下游及职责划分）}
+
+\subsection{上游模块}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{4cm}L{4.5cm}L{5.5cm}}
+\toprule
+\textbf{上游} & \textbf{输入} & \textbf{说明} \\
+\midrule
+6.1 物理层一般描述 & 链路命名、$T_s$/$f_s$、比特序 & 全局 PHY 基准与三类内容定义 \\
+MAC/RLC & 待发送控制/数据比特 & 由 6.2.4/6.2.5 组装后映射 \\
+帧配置/调度 & 域类型、链路类型、符号类型 & 决定 PIB 选择与 RE 映射上下文 \\
+6.2.2 帧结构 & 时频网格 $(k,l)_p$ & RE 坐标与符号编号 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{下游模块}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{4cm}L{4.5cm}L{5.5cm}}
+\toprule
+\textbf{下游} & \textbf{输出} & \textbf{说明} \\
+\midrule
+6.2.3 & 信号类型 + RE 需求 & FTS/STS、DMRS、SRS、CSI-RS、PMS、PAS \\
+6.2.4 & 控制类型 + PIB 归属 & SAB/RAB/G-PCIB/P-PCIB 内 GCI/TCI \\
+6.2.5 & 数据类型 + RE 映射 & 第一/二类 TB 与 DMRS-D 绑定 \\
+6.2.6/6.5 & 待编码比特流 & CRC、极化码、调制、加扰 \\
+6.2.7/6.2.8 & 搜网/同步流程入口 & 以 SAB/FTS/STS 为第一步 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{本模块不负责的内容}
+
+\begin{itemize}[nosep]
+  \item CP-OFDM 波形与帧结构（6.2.2）；
+  \item 各信号/控制/数据的比特字段与编码映射（6.2.3\textasciitilde 6.2.5）；
+  \item 信道编码算法（6.2.6）、OFDM 合成（6.2.9）、射频发射（6.2.10）；
+  \item 高层 MAC/RLC 语义与调度策略（数据链路层）。
+\end{itemize}
+
+\section{在 SLB 通信流程中的角色}
+
+6.2.1 处于 PHY \textbf{内容组织最顶层}：在``帧结构已定''（6.2.2）与``具体波形生成''（6.2.3\textasciitilde 6.2.5）之间，回答``空口上传什么、放在哪个 PIB/链路/流程阶段''。
+
+\textbf{通信域接收故事线（与 8 类信号出现顺序对应）：}
+\begin{enumerate}[nosep]
+  \item \textbf{搜网}：盲检 FTS/STS（同步信号）$\rightarrow$ 读 SAB 同步信息；
+  \item \textbf{获知配置}：读广播信息（控制，散布资源）；
+  \item \textbf{接入}：RAB 上 STS/FTS + 接入信息；
+  \item \textbf{跟调度}：G-PCIB + G-DMRS-C $\rightarrow$ 解析 DSCI/预配置等；
+  \item \textbf{传数据}：调度 RE 上的 DMRS-D + 第一/二类数据 $\pm$ 相位调整信号；
+  \item \textbf{闭环}：CSI-RS/SRS 测量 $\rightarrow$ CQI；T-DMRS-C 伴随 TCI 反馈；
+  \item \textbf{定位}：按资源指示在指定符号发/收位置测量信号；
+  \item \textbf{空闲 RE}：未调度则不解析（$a_{k,l}{=}0$）。
+\end{enumerate}
+
+\textbf{直通链路简化故事线：}SAB $\rightarrow$ P-PCIB（直通 DSCI）$\rightarrow$ P-DMRS-C + DMRS-D + 数据。
+
+%----------------------------------------------------------------------
+\section{关键参数与强制要求（提炼版）}
+%----------------------------------------------------------------------
+
+\subsection{三类内容分类边界}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{类型} & \textbf{条目数} & \textbf{是否承载高层比特} & \textbf{映射形态} \\
+\midrule
+物理层信号 & 8 & 否 & RE 集合；部分嵌入 SAB/RAB \\
+物理层控制信息 & 17 & 是（控制面） & PIB 内或散布 RE \\
+物理层数据信息 & 2 & 是（用户面/信令） & 调度 RE / A-PDIB \\
+\bottomrule
+\end{tabular}
+\caption{三类内容维度（见 6.2.1、6.1）}
+\end{table}
+
+\subsection{8 类物理层信号索引}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{clll}
+\toprule
+\textbf{序号} & \textbf{6.2.1 名称} & \textbf{典型链路} & \textbf{6.2.3 实现条款} \\
+\midrule
+1 & 同步信号 & G/直通/T & 6.2.3.1 FTS/STS \\
+2 & G 链路公共解调参考信号 & G & 6.2.3.4 G-DMRS-C \\
+3 & T 链路控制信息解调参考信号 & T & 6.2.3.7 T-DMRS-C \\
+4 & 数据信息解调参考信号 & G/T/D/附/直通 & 6.2.3.6 DMRS-D \\
+5 & 数据信息相位调整信号 & 数据链路 & 6.2.3.8 PAS \\
+6 & 信道探测信号 & T$\rightarrow$G & 6.2.3.2 SRS \\
+7 & 信道状态信息参考信号 & G$\rightarrow$T & 6.2.3.3 CSI-RS \\
+8 & 位置测量信号 & G/T & 6.2.3.9 PMS \\
+\bottomrule
+\end{tabular}
+\caption{8 类物理层信号（见 6.2.1）}
+\end{table}
+
+\subsection{17 类物理层控制信息索引}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{cll}
+\toprule
+\textbf{序号} & \textbf{6.2.1 名称} & \textbf{6.2.4 实现子节} \\
+\midrule
+1 & 同步信息 & 6.2.4.1 \\
+2 & 广播信息 & 6.2.4.2 \\
+3 & 接入信息 & 6.2.4.4 \\
+4 & 动态调度数据控制信息 & 6.2.4.6.1 \\
+5 & 预配置调度激活去激活信息 & 6.2.4.6.2 \\
+6 & 休眠与唤醒指示信息 & 6.2.4.6.3 \\
+7 & 快速载波切换指示信息 & 6.2.4.6.4 \\
+8 & 初始接入载波指示信息 & 6.2.4.6.5 \\
+9 & G 链路位置测量信号或感知测量信号资源指示信息 & 6.2.4.6.6 \\
+10 & T 链路位置测量信号资源指示信息 & 6.2.4.6.7 \\
+11 & 直通链路动态调度数据控制信息 & 6.2.4.8 \\
+12 & 单级 HARQ 反馈信息 & 6.2.4.10.1 \\
+13 & 两级 HARQ 反馈信息 & 6.2.4.10.2 \\
+14 & CQI 反馈信息 & 6.2.4.10.3 \\
+15 & 调度请求信息 & 6.2.4.10.4 \\
+\bottomrule
+\end{tabular}
+\caption{物理层控制信息索引（6.2.1 条文列举 15 项；含通信域/直通同步区分及 DSCI 多格式时，工程实现按 6.2.4 扩展为 17 类）}
+\end{table}
+\small 注：SAB/RAB/G-PCIB/P-PCIB 为 PIB 容器（6.2.4.2\textasciitilde 5、6.2.4.7、6.2.4.9），不单独计入控制信息清单。
+
+\subsection{2 类物理层数据信息与 PIB 结构}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{数据类型} & \textbf{调度特征} & \textbf{典型链路} & \textbf{标准条款} \\
+\midrule
+第一类物理层数据信息 & 仅预配置 & G/T/附 & 6.2.5.2 \\
+第二类物理层数据信息 & 预配置 + 动态 & G/T/D/附 & 6.2.5.3 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{通信域 PIB}（4 块）：SAB、RAB、G-PCIB、A-PDIB。
+
+\textbf{通信域散布资源}（不进上述四块整包）：广播信息、G-DMRS-C、T 链路控制信息（TCI）、DMRS-D、物理层数据信息、信道探测信号、CSI-RS、位置测量信号、PAS、空闲 RE。
+
+\textbf{直通链路 PIB}（2 块）：SAB、P-PCIB。
+
+\textbf{直通链路散布资源}：P-DMRS-C、DMRS-D、物理层数据信息、空闲 RE。
+
+%----------------------------------------------------------------------
+\section{本节核心详解}
+%----------------------------------------------------------------------
+
+\subsection{物理层信号：功能与空口上下文总览}
+
+6.2.1 列举 8 类\textbf{逻辑信号}；6.2.3 进一步细化为 FTS/STS、各类 DMRS 等\textbf{具体波形}。下表给出每类信号的功能定位、典型所在位置与流程上下文。
+
+\begin{longtable}{@{}>{\small}L{2.4cm}>{\small}L{2cm}>{\small}L{3.2cm}>{\small}L{3.8cm}>{\small}L{3.2cm}@{}}
+\caption{8 类物理层信号功能与空口上下文总览} \\
+\toprule
+\textbf{6.2.1 信号} & \textbf{6.2.3 条款} & \textbf{核心功能} & \textbf{典型时频/PIB 位置} & \textbf{流程上下文} \\
+\midrule
+\endfirsthead
+\multicolumn{5}{c}{\small（续表）} \\
+\toprule
+\textbf{6.2.1 信号} & \textbf{6.2.3 条款} & \textbf{核心功能} & \textbf{典型时频/PIB 位置} & \textbf{流程上下文} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+同步信号 &
+6.2.3.1 FTS/STS &
+定时/频偏同步；STS $u$ 携带节点标识低 4 位 &
+SAB/RAB：\#0=STS，\#1\textasciitilde\#2=FTS &
+\textbf{空口第一步}：T 盲检 SAB（6.2.7）；多域 FTS 捕获（6.2.8） \\
+G 链路公共解调参考信号 &
+6.2.3.4 G-DMRS-C &
+G 链路控制（G-PCIB）信道估计 &
+含 SAB 的 TTI：首帧 \#6；无 SAB：\#0 &
+G-PCIB 盲检/解调前；与 G 链路控制 RE 同功率 \\
+T 链路控制信息解调参考信号 &
+6.2.3.7 T-DMRS-C &
+TCI（HARQ/CQI/SR）上行信道估计 &
+TCI 发送符号的\textbf{第一个符号} &
+DSCI/预配置触发 TCI 后；T$\rightarrow$G 反馈链路 \\
+数据信息解调参考信号 &
+6.2.3.6 DMRS-D &
+第一/二类数据解调、MIMO 信道估计 &
+调度数据符号内连续 $N$ 个 DMRS 符号 &
+动态/预配置调度数据时；G/T/D/附/直通均可用 \\
+数据信息相位调整信号 &
+6.2.3.8 PAS &
+跨符号相位跟踪/补偿 &
+数据帧\textbf{首符号}上配置子载波 $k_0,k_1$ &
+多符号数据、预编码/频偏导致相位漂移时 \\
+信道探测信号 &
+6.2.3.2 SRS &
+T$\rightarrow$G 上行信道探测 &
+T 链路符号；\texttt{srs-Set-Conf} 配置 &
+G 测量 T 上行质量；辅助 T 链路调度 \\
+信道状态信息参考信号 &
+6.2.3.3 CSI-RS &
+G$\rightarrow$T 下行信道参考 &
+G 链路；CSI-RS 在 G-PCIB 后或 STS 后起始 &
+T 测量下行质量 $\rightarrow$ CQI 反馈（6.2.4.10.3） \\
+位置测量信号 &
+6.2.3.9 PMS &
+测距/定位（RTT、AoA 等） &
+资源指示所调度 TTI 内指定符号 &
+6.2.4.6.6/6.7 资源指示触发；按需插入 \\
+\end{longtable}
+
+\textbf{补充说明：}
+\begin{itemize}[nosep]
+  \item 直通链路 PIB 描述中另有 \textbf{P-DMRS-C}（6.2.3.5），功能类比 G-DMRS-C，固定映射于含 SAB 的 TTI 首帧 \#6，服务于 P-PCIB 解调；
+  \item 6.2.3.10 定义\textbf{感知测量}参考信号，由 6.2.4.6.6 感知资源指示调度，实现感知时与 PMS 并列阅读。
+\end{itemize}
+
+\subsection{物理层控制信息：功能与典型上下文}
+
+\begin{table}[h]
+\centering
+\small
+\caption{17 类控制信息：功能与典型所在 PIB/上下文}
+\begin{tabular}{L{4.5cm}L{5.5cm}L{4.5cm}}
+\toprule
+\textbf{控制信息} & \textbf{功能} & \textbf{典型位置/上下文} \\
+\midrule
+\multicolumn{3}{l}{\textit{网络发现与接入}} \\
+同步信息 & 帧/节点/SAB 周期/GCI 位图 & SAB \#3\textasciitilde\#4 \\
+广播信息 & 符号类型、TTI 长度、$N_{\mathrm{Symb-G-PCIB}}$ 等 & \#5、\#7；8\,ms 周期 \\
+接入信息 & 随机接入、SR、服务发现等 & RAB \#3\textasciitilde\#4 \\
+初始接入载波指示 & 三种带宽接入载波信道号 & G-PCIB；接入周期内 \\
+\multicolumn{3}{l}{\textit{调度与资源}} \\
+动态调度数据控制信息 & 时频资源、MCS、HARQ、CBG & G-PCIB \\
+预配置调度激活去激活 & 半静态 grant 开/关 & G-PCIB \\
+直通动态调度 & 直通 TB 时频资源 & P-PCIB \\
+G/T 位置（感知）资源指示 & 测量符号/端口/波束配置 & G-PCIB \\
+\multicolumn{3}{l}{\textit{功耗与载波}} \\
+休眠与唤醒指示 & 58 T 节点 DRX 位图 & G-PCIB \\
+快速载波切换指示 & 切换前后信道号与时刻 & G-PCIB \\
+\multicolumn{3}{l}{\textit{反馈与请求}} \\
+单级/两级 HARQ 反馈 & ACK/NACK、MCS 偏移 & TCI（T 链路） \\
+CQI 反馈 & 各载波/子载波组 MCS 建议 & TCI \\
+调度请求 & T 节点上行资源请求 & TCI 或 RAB 接入目的=1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{物理层数据信息（2 类）}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{类型} & \textbf{调度方式} & \textbf{典型链路} & \textbf{配套信号/控制} \\
+\midrule
+第一类 & 仅预配置 & G/T/附 & 固定 $K{\cdot}N$；预配置激活 \\
+第二类 & 预配置 + 动态 & G/T/D/附 & DSCI 指示资源/MCS/HARQ；DMRS-D \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{物理层信息块（PIB）与两域对比}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{PIB} & \textbf{主要信号 + 控制} & \textbf{数据} \\
+\midrule
+SAB & FTS、STS + 同步信息 & --- \\
+RAB & FTS、STS + 接入信息 & 接入目的=4 时 \#5\textasciitilde\#6 高层数据 \\
+G-PCIB & G-DMRS-C（散布 \#6/\#0）+ 各类 GCI & --- \\
+A-PDIB & STS、FTS、周期 DMRS-D & 附链路第一/二类数据 \\
+P-PCIB（直通） & P-DMRS-C + 直通 DSCI & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%----------------------------------------------------------------------
+\section{数据类型、长度与维度}
+%----------------------------------------------------------------------
+
+6.2.1 为索引节，不规定各字段位宽；下表汇总\textbf{分类维度}与\textbf{条目规模}，供实现模块划分参考。具体位宽见 6.2.4/6.2.5。
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{对象/分类} & \textbf{条目数或规模} & \textbf{映射单位} & \textbf{备注} \\
+\midrule
+物理层信号类型 & 8 类 & RE 集合 & 不承载高层比特 \\
+物理层控制类型 & 17 类 & PIB 内或散布 RE & 承载控制面比特 \\
+物理层数据类型 & 2 类 & 调度 RE / A-PDIB & 含高层信令 \\
+通信域 PIB & 4 块 & 多块 RE 组合 & SAB/RAB/G-PCIB/A-PDIB \\
+直通链路 PIB & 2 块 & 多块 RE 组合 & SAB/P-PCIB \\
+散布资源种类 & 9 类（通信域） & 独立 RE 映射 & 不进四块 PIB 整包 \\
+空闲 RE & 未分配/未调度 & $a_{k,l}{=}0$ & 6.2.2.7 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%----------------------------------------------------------------------
+\section{时序关系与触发条件}
+%----------------------------------------------------------------------
+
+6.2.1 为静态分类，不含状态机；各类内容在超帧/无线帧内的\textbf{出现顺序与周期}由 6.2.2 帧结构与 6.2.4 调度规则决定。典型顺序如下：
+
+\begin{enumerate}[nosep]
+  \item \textbf{SAB}（含 FTS/STS + 同步信息）：周期出现，终端搜网入口；
+  \item \textbf{广播信息}：8\,ms 周期，\#5/\#7 符号；
+  \item \textbf{RAB}：接入阶段或 COT 末帧，竞争接入；
+  \item \textbf{G-PCIB / P-PCIB}：每 TTI 或预配置周期，承载 GCI/直通调度；
+  \item \textbf{数据 + DMRS-D}：按 DSCI/预配置映射，事件/周期触发；
+  \item \textbf{SRS / CSI-RS / PMS}：预配置或资源指示触发，按需插入。
+\end{enumerate}
+
+%----------------------------------------------------------------------
+\section{链路—信号—PIB 对照表}
+%----------------------------------------------------------------------
+
+\begin{table}[h]
+\centering
+\footnotesize
+\begin{tabular}{L{3.2cm}L{2cm}L{2.2cm}L{2.2cm}L{4.5cm}}
+\toprule
+\textbf{内容} & \textbf{通信域 PIB} & \textbf{直通 PIB} & \textbf{链路} & \textbf{6.2.3/6.2.4 条款} \\
+\midrule
+FTS/STS + 同步信息 & SAB & SAB & G/直通 & 6.2.3.1、6.2.4.1\textasciitilde 2 \\
+接入信息 & RAB & --- & T$\rightarrow$G & 6.2.4.4\textasciitilde 5 \\
+G-DMRS-C & 散布 & --- & G & 6.2.3.4 \\
+P-DMRS-C & --- & 散布 & 直通 & 6.2.3.5 \\
+T-DMRS-C & --- & --- & T & 6.2.3.7 \\
+DMRS-D & 散布 & 散布 & G/T/D/附/直通 & 6.2.3.6 \\
+PAS & 散布 & 散布 & 数据链路 & 6.2.3.8 \\
+SRS & 散布 & --- & T$\rightarrow$G & 6.2.3.2 \\
+CSI-RS & 散布 & --- & G$\rightarrow$T & 6.2.3.3 \\
+PMS & 散布 & --- & G/T & 6.2.3.9 \\
+GCI（DSCI 等） & G-PCIB & --- & G & 6.2.4.6\textasciitilde 7 \\
+直通 DSCI & --- & P-PCIB & 直通 & 6.2.4.8\textasciitilde 9 \\
+TCI & --- & --- & T$\rightarrow$G & 6.2.4.10 \\
+第一/二类数据 & 散布 / A-PDIB & 散布 & 各链路 & 6.2.5 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%----------------------------------------------------------------------
+\section{约束与实现要点}
+%----------------------------------------------------------------------
+
+\begin{enumerate}[nosep]
+  \item \textbf{先同步后解调}：任何控制/数据解析均依赖 FTS/STS 建立的定时与 SAB 中的系统参数；
+  \item \textbf{信号不承载用户比特}：8 类信号均为接收机辅助波形；用户载荷仅在 6.2.5 两类数据中；
+  \item \textbf{链路前缀语义}：同名信号/控制按 G/T/附/直通前缀区分发送方向，实现时不得混用链路类型；
+  \item \textbf{G-DMRS-C 载波约束}：无 SAB 的基础载波不发送 G-DMRS-C，盲检 G-PCIB 时需结合 SAB 存在性；
+  \item \textbf{DMRS 与数据绑定}：DMRS-D 资源随 DSCI/预配置变化，不得按固定帧格式硬编码；
+  \item \textbf{域类型不可混用}：通信域 PIB（RAB/G-PCIB/A-PDIB）不适用于直通链路；
+  \item \textbf{空闲 RE 处理}：未分配 RE 对应 $a_{k,l}{=}0$，接收端不得当作有效载荷；
+  \item \textbf{中心子载波}：$a_{80,l}\equiv 0$，任何内容均不映射至 \#80 子载波；
+  \item \textbf{6.2.1 与 6.2.3 映射}：6.2.1 为逻辑分类，6.2.3.1\textasciitilde 10 为波形级定义（含感知扩展）；
+  \item \textbf{PIB 与散布资源}：广播、DMRS-D、SRS、CSI-RS、PAS、PMS 等不进四块 PIB 整包，须单独解析映射规则。
+\end{enumerate}
+
+%----------------------------------------------------------------------
+\section{与标准其他章节的衔接}
+%----------------------------------------------------------------------
+
+\begin{itemize}[nosep]
+  \item \textbf{6.1}：物理层通用服务、三类内容定义、链路命名与 $T_s$/$f_s$ 基准；
+  \item \textbf{6.2.2}：RE 网格、符号类型，是本文``所在位置''的坐标系；
+  \item \textbf{6.2.3}：8 类信号序列、映射与功率的\textbf{实现细则}；
+  \item \textbf{6.2.4}：17 类控制如何触发 SRS/CSI-RS/PMS 及数据调度；
+  \item \textbf{6.2.5}：数据与 DMRS-D 的比特级处理；
+  \item \textbf{6.2.7/6.2.8}：SAB 盲检与 FTS 捕获的系统流程；
+  \item \textbf{6.3}：灵活带宽下相同内容分类的 $\alpha$ 缩放。
+\end{itemize}
+
+\vfill
+\begin{center}
+\small\textcolor{gray}{字段级定义与完整参数以 T/XS 10001-2025 第 6 章及 6.2.3\textasciitilde 6.2.5 各节为准；本文档提供 6.2.1 分类索引与空口上下文，供 SLB 120\,kHz 物理层实现与联调参考。}
+\end{center}
+
+\end{document}
