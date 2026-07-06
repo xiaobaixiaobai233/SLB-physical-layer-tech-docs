@@ -1,0 +1,483 @@
+% 由主文档 \input 引入；勿单独编译
+
+\noindent\textbf{读表约定}：所有控制信息从 LSB（bit\,0）到 MSB 排列；``累计 bit'' 为字段在 80/82/…\,bit 字中的闭区间索引；CRC 均位于最高位侧。
+
+%---- 一、散布类控制信息 -----------------------------------------------
+\subsection{散布类控制信息（SAB/RAB/散布 RE）}
+
+\subsubsection{6.2.4.1.1 通信域同步信息（80\,bit，SAB \#3/\#4）}
+
+\footnotesize
+\begin{longtable}{@{}clllL{5.4cm}@{}}
+\caption{比特表 1\quad 通信域同步信息比特字段} \\
+\toprule
+\textbf{序} & \textbf{累计 bit} & \textbf{字段} & \textbf{宽} & \textbf{取值/含义} \\
+\midrule
+\endfirsthead
+\multicolumn{5}{c}{\tablename\ \thetable\ （续）} \\
+\toprule
+\textbf{序} & \textbf{累计 bit} & \textbf{字段} & \textbf{宽} & \textbf{取值/含义} \\
+\midrule
+\endhead
+1 & 0--2 & 信息格式指示 & 3 & 固定 0 \\
+2 & 3--26 & G 节点标识 & 24 & G 节点开机随机产生 \\
+3 & 27--34 & 多域同步能力属性 & 8 & 见 6.2.10 \\
+4 & 35--36 & SAB 传输周期 & 2 & 0 无周期；1/2/3 $\rightarrow$ 2/4/8 超帧 \\
+5 & 37--40 & 剩余 SAB 周期数 & 4 & 15 连续；14 连续+RACH 结尾；0 非连续+RACH 结尾 \\
+6 & 41--48 & GCI 组位图 & 8 & LSB=公共 GCI；其余每 bit 对应 1 个 T 节点组 \\
+7 & 49 & 符号类型指示 & 1 & 0 类型一 A/二；1 类型三/四/一 B \\
+8 & 50 & 直通链路允许 & 1 & 0 不允许；1 允许 \\
+9 & 51 & 广播存在性 & 1 & 0 本 TTI 无广播；1 本 TTI 有广播 \\
+10 & 52--55 & 预留 & 4 & 全 0 \\
+11 & 56--79 & CRC24B & 24 & $g_{\mathrm{CRC24B}}(D)$，6.5.1 \\
+\bottomrule
+\end{longtable}
+\normalsize
+
+\subsubsection{6.2.4.1.1 直通链路同步信息（80\,bit，SAB \#3/\#4）}
+
+\footnotesize
+\begin{longtable}{@{}clllL{5.4cm}@{}}
+\caption{比特表 2\quad 直通链路同步信息比特字段} \\
+\toprule
+\textbf{序} & \textbf{累计 bit} & \textbf{字段} & \textbf{宽} & \textbf{取值/含义} \\
+\midrule
+1 & 0--2 & 信息格式指示 & 3 & 固定 1 \\
+2 & 3--26 & 先发节点标识 & 24 & 先发节点 Phy-ID \\
+3 & 27--50 & 后发节点/组标识 & 24 & 服务发现 COT 时取 1 \\
+4 & 51--52 & NCTU-PCI & 2 & 0/1/2/3 $\rightarrow$ $L{=}1/2/4/8$ \\
+5 & 53--54 & NPCI & 2 & 直通 DSCI 个数 \\
+6 & 55 & 预留 & 1 & 全 0 \\
+7 & 56--79 & CRC24B & 24 & $g_{\mathrm{CRC24B}}(D)$，6.5.1 \\
+\bottomrule
+\end{longtable}
+\normalsize
+
+\subsubsection{6.2.4.3.1 广播信息（72\,bit，\#5/\#7）}
+
+\footnotesize
+\begin{longtable}{@{}clllL{5.4cm}@{}}
+\caption{比特表 3\quad 广播信息比特字段} \\
+\toprule
+\textbf{序} & \textbf{累计 bit} & \textbf{字段} & \textbf{宽} & \textbf{取值/含义} \\
+\midrule
+1 & 0--2 & 符号类型指示 & 3 & 0 一 A；1 一 B；2 二；3 三；4 四 \\
+2 & 3 & 传输模式 & 1 & 0 连续；1 非连续 \\
+3 & 4--22 & 无线帧索引号 & 19 & 高 16 超帧号；低 3 无线帧号 \\
+4 & 23--25 & TTI 长度指示 & 3 & 0--6：1/2/4/8/16/32/64 无线帧；7 预留 \\
+5 & 26--28 & SIB0 发送周期 & 3 & 0--7：起始帧为 64/128/…/8192 倍数 \\
+6 & 29--30 & SIB0 连续 TTI 数 & 2 & 0--3：最多 8/16/32/64 个连续 TTI \\
+7 & 31--33 & NSymb-G-PCIB & 3 & 0--7 $\rightarrow$ 1/2/3/4/6/8/10/12 符号 \\
+8 & 34 & 广播/SIB 变更指示 & 1 & 0 下周期不变；1 下周期变更 \\
+9 & 35--36 & 变更周期 & 2 & 0--3：512/1024/2048/4096 无线帧 \\
+10 & 37--47 & 预留 & 11 & 全 0 \\
+11 & 48--71 & CRC24B & 24 & $g_{\mathrm{CRC24B}}(D)$，6.5.1 \\
+\bottomrule
+\end{longtable}
+\normalsize
+
+\subsubsection{6.2.4.4.1 接入信息（80\,bit，RAB \#3/\#4）}
+
+\footnotesize
+\begin{longtable}{@{}clllL{5.4cm}@{}}
+\caption{比特表 4\quad 接入信息比特字段} \\
+\toprule
+\textbf{序} & \textbf{累计 bit} & \textbf{字段} & \textbf{宽} & \textbf{取值/含义} \\
+\midrule
+1 & 0--2 & 信息格式指示 & 3 & 固定 2 \\
+2 & 3--26 & T 节点标识 & 24 & T 节点随机产生 \\
+3 & 27--50 & G 节点标识 & 24 & 与目标 G 节点同步信息中 G-ID 一致 \\
+4 & 51--53 & 接入目的 & 3 & 0 初始接入；1 SR；2 无连接测量；3 服务发现；4 随路短数据 \\
+5 & 54--55 & 初始接入带宽类型 & 2 & 0 1 载波；1 4 载波；2 全频段；3 预留 \\
+6 & 56--79 & CRC24B & 24 & $g_{\mathrm{CRC24B}}(D)$，6.5.1 \\
+\bottomrule
+\end{longtable}
+\normalsize
+
+%---- 二、G 链路控制信息 GCI -------------------------------------------
+\subsection{G 链路控制信息 GCI（G-PCIB CTU，6.2.4.6）}
+
+\subsubsection{6.2.4.6.1 DSCI——TB 模式（82\,bit）}
+
+\footnotesize
+\begin{longtable}{@{}clllL{5.4cm}@{}}
+\caption{比特表 5\quad 动态调度数据控制信息（TB+TB HARQ，82\,bit）} \\
+\toprule
+\textbf{序} & \textbf{累计 bit} & \textbf{字段} & \textbf{宽} & \textbf{取值/含义} \\
+\midrule
+1 & 0--3 & 格式指示 & 4 & 固定 0 \\
+2 & 4 & 链路类型 & 1 & 0 G 链路；1 T 链路 \\
+3 & 5--7 & DMRS 端口数指示 & 3 & 端口数 $=$ 数值$+1$ \\
+4 & 8--23 & 频域资源指示 & 16 & 位图对应工作子载波组（初接前 T 组，XRC 后 G 组） \\
+5 & 24--30 & 起始符号指示 & 7 & TTI 内起始符号；单位随 TTI 长度缩放 \\
+6 & 31--37 & 结束符号指示 & 7 & TTI 内结束符号；单位同上 \\
+7 & 38--39 & HARQ 进程指示 & 2 & 进程号 \\
+8 & 40 & 新包指示 & 1 & 翻转=新包；不变=重传 \\
+9 & 41--45 & MCS 指示 & 5 & 调制编码索引 \\
+10 & 46--48 & 符号重复指示 & 3 & 重复次数集合索引（未配时 数值$+1$） \\
+11 & 49--50 & 冗余版本 RV & 2 & 0--3 $\rightarrow$ RV0--RV3 \\
+12 & 51--53 & ACK 资源池索引 & 3 & 8 池之一；广播/T 链路/XRCSetup 时无效 \\
+13 & 54--57 & TCI 基础载波序号 & 4 & 载波序号 $=$ 数值$+1$；广播/T 链路/XRCSetup 时无效 \\
+14 & 58--81 & CRC24B+加扰 & 24 & CRC24B + 24\,bit Phy-ID 加扰 \\
+\bottomrule
+\end{longtable}
+\normalsize
+
+\subsubsection{6.2.4.6.1 DSCI——CBG 模式（88\,bit）}
+
+\footnotesize
+\begin{longtable}{@{}clllL{5.4cm}@{}}
+\caption{比特表 6\quad 动态调度数据控制信息（CBG+CBG HARQ，88\,bit）} \\
+\toprule
+\textbf{序} & \textbf{累计 bit} & \textbf{字段} & \textbf{宽} & \textbf{取值/含义} \\
+\midrule
+1 & 0 & 链路类型 & 1 & 0 G；1 T \\
+2 & 1--3 & DMRS 端口数 & 3 & 数值$+1$ \\
+3 & 4--19 & 频域资源 & 16 & G 节点工作子载波组位图 \\
+4 & 20--26 & 起始符号 & 7 & 同比特表\,5 \\
+5 & 27--33 & 结束符号 & 7 & 同比特表\,5 \\
+6 & 34--35 & HARQ 进程 & 2 & --- \\
+7 & 36 & 新包指示 & 1 & --- \\
+8 & 37--41 & MCS & 5 & --- \\
+9 & 42--44 & 符号重复 & 3 & --- \\
+10 & 45--46 & RV & 2 & --- \\
+11 & 47--49 & ACK 资源池 & 3 & T 链路调度时无效 \\
+12 & 50--53 & TCI 载波序号 & 4 & T 链路调度时无效 \\
+13 & 54--(53+$X$) & CBG 重传位图 & $X$ & $X{=}2/4/8$（\texttt{singleStageCBGNumber}）；初传全 1 \\
+14 & --- & 填充 & $Y$ & $X{+}Y{=}8$，全 0 \\
+15 & --- & 预留 & 2 & 全 0 \\
+16 & 末 24 & CRC24B+加扰 & 24 & Phy-ID 加扰 \\
+\bottomrule
+\end{longtable}
+\normalsize
+
+\noindent 注：CBG 模式中 bit\,54 起 $X{+}Y{=}8$ 连续 8\,bit，其后 2\,bit 预留，末 24\,bit CRC（累计至 88\,bit）。
+
+\subsubsection{6.2.4.6.1 DSCI——一级两级调度（91\,bit）}
+
+\footnotesize
+\begin{longtable}{@{}clllL{5.4cm}@{}}
+\caption{比特表 7\quad 第一级动态调度数据控制信息（91\,bit）} \\
+\toprule
+\textbf{序} & \textbf{累计 bit} & \textbf{字段} & \textbf{宽} & \textbf{取值/含义} \\
+\midrule
+1 & 0 & GCI 格式指示 & 1 & 固定 0 \\
+2 & 1 & 链路类型 & 1 & 0 G；1 T \\
+3 & 2--4 & DMRS 端口数 & 3 & 数值$+1$ \\
+4 & 5--20 & 频域资源 & 16 & G 子载波组位图 \\
+5 & 21--27 & 起始符号 & 7 & --- \\
+6 & 28--34 & 结束符号 & 7 & --- \\
+7 & 35--36 & HARQ 进程 & 2 & --- \\
+8 & 37 & 新包指示 & 1 & --- \\
+9 & 38--42 & MCS & 5 & --- \\
+10 & 43--45 & 符号重复 & 3 & --- \\
+11 & 46--47 & RV & 2 & --- \\
+12 & 48--50 & ACK 资源池 & 3 & T 链路时无效 \\
+13 & 51--54 & TCI 载波序号 & 4 & T 链路时无效 \\
+14 & 55--62 & CBG 位图+填充 & 8 & $X{+}Y{=}8$；重传类型 0/1 时有效 \\
+15 & 63--64 & 重传类型指示 & 2 & 0 一级 CBG 重传；1 两级 T 链路 CBG；2/3 两级 HARQ 反馈触发 \\
+16 & 65--66 & 预留 & 2 & 全 0 \\
+17 & 67--90 & CRC24B+加扰 & 24 & Phy-ID \\
+\bottomrule
+\end{longtable}
+\normalsize
+
+\subsubsection{6.2.4.6.1 DSCI——二级子 CBG（91\,bit）}
+
+\footnotesize
+\begin{longtable}{@{}clllL{5.4cm}@{}}
+\caption{比特表 8\quad 第二级动态调度数据控制信息（91\,bit）} \\
+\toprule
+\textbf{序} & \textbf{累计 bit} & \textbf{字段} & \textbf{宽} & \textbf{取值/含义} \\
+\midrule
+1 & 0 & GCI 格式指示 & 1 & 固定 1 \\
+2 & 1--64 & 子 CBG 重传位图 & 64 & 每 bit 对应 1 个子 CBG；仅 T 链路 CBG 重传 \\
+3 & 65--66 & 预留 & 2 & 全 0 \\
+4 & 67--90 & CRC24B+加扰 & 24 & Phy-ID；不用于 G 链路/初传 \\
+\bottomrule
+\end{longtable}
+\normalsize
+
+\subsubsection{6.2.4.6.2 预配置调度激活去激活（82\,bit）}
+
+\footnotesize
+\begin{longtable}{@{}clllL{5.4cm}@{}}
+\caption{比特表 9\quad 预配置调度激活去激活信息} \\
+\toprule
+\textbf{序} & \textbf{累计 bit} & \textbf{字段} & \textbf{宽} & \textbf{取值/含义} \\
+\midrule
+1 & 0--15 & 频域资源指示 & 16 & 激活预配置频域；仅去激活时为 0 \\
+2 & 16--31 & 激活预配置 ID & 16 & 仅去激活时填未配置 ID \\
+3 & 32--47 & 去激活预配置 ID & 16 & 仅激活时填未配置 ID \\
+4 & 48--51 & TCI 基础载波序号 & 4 & 数值$+1$；无对应 TCI 时无效 \\
+5 & 52--57 & 预留 & 6 & 全 0 \\
+6 & 58--81 & CRC24B+掩码 & 24 & CRC24B + \texttt{newphy-IDforPreConfig} \\
+\bottomrule
+\end{longtable}
+\normalsize
+
+\subsubsection{6.2.4.6.3 休眠与唤醒指示（82\,bit）}
+
+\footnotesize
+\begin{longtable}{@{}clllL{5.4cm}@{}}
+\caption{比特表 10\quad 休眠与唤醒指示信息} \\
+\toprule
+\textbf{序} & \textbf{累计 bit} & \textbf{字段} & \textbf{宽} & \textbf{取值/含义} \\
+\midrule
+1 & 0--57 & T 节点休眠/唤醒位图 & 58 & 每 bit 对应 1 特定 T 节点（位置高层配置）；1 监听 GCI，0 不监听 \\
+2 & 58--81 & CRC24B+掩码 & 24 & CRC24B + \texttt{wakeupMASK} \\
+\bottomrule
+\end{longtable}
+\normalsize
+
+\subsubsection{6.2.4.6.4 快速载波切换指示（82\,bit）}
+
+\footnotesize
+\begin{longtable}{@{}clllL{5.4cm}@{}}
+\caption{比特表 11\quad 快速载波切换指示信息} \\
+\toprule
+\textbf{序} & \textbf{累计 bit} & \textbf{字段} & \textbf{宽} & \textbf{取值/含义} \\
+\midrule
+1 & 0--3 & 格式指示 & 4 & 固定 2 \\
+2 & 4 & 切换节点类型 & 1 & 0 G 节点；1 T 节点 \\
+3 & 5--20 & 切换前信道号 & 16 & 工作载波信道号 \\
+4 & 21--36 & 切换后信道号 & 16 & 目标工作载波信道号 \\
+5 & 37--44 & 切换时刻指示 & 8 & 以当前 TTI 为起点，末 TTI 偏移（单位 TTI）；0=当前 TTI 即末 TTI \\
+6 & 45--57 & 预留 & 13 & 全 0 \\
+7 & 58--81 & CRC24B+加扰 & 24 & G-ID 或特定 T-ID 加扰 \\
+\bottomrule
+\end{longtable}
+\normalsize
+
+\subsubsection{6.2.4.6.5 初始接入载波指示（82\,bit）}
+
+\footnotesize
+\begin{longtable}{@{}clllL{5.4cm}@{}}
+\caption{比特表 12\quad 初始接入载波指示信息} \\
+\toprule
+\textbf{序} & \textbf{累计 bit} & \textbf{字段} & \textbf{宽} & \textbf{取值/含义} \\
+\midrule
+1 & 0--3 & 格式指示 & 4 & 固定 3 \\
+2 & 4--19 & 1 基础载波接入信道号 & 16 & 初始接入 1 载波工作信道 \\
+3 & 20--35 & 4 基础载波接入信道号 & 16 & 初始接入 4 载波工作信道 \\
+4 & 36--51 & 全频段接入信道号 & 16 & 初始接入全频段工作信道 \\
+5 & 52--57 & 预留 & 6 & 全 0 \\
+6 & 58--81 & CRC24B+加扰 & 24 & G 节点标识加扰 \\
+\bottomrule
+\end{longtable}
+\normalsize
+
+\subsubsection{6.2.4.6.6 位置/感知资源指示——子格式 0（82\,bit）}
+
+\footnotesize
+\begin{longtable}{@{}clllL{5.2cm}@{}}
+\caption{比特表 13\quad G 链路位置测量资源指示（双边两信号，子格式 0）} \\
+\toprule
+\textbf{序} & \textbf{累计 bit} & \textbf{字段} & \textbf{宽} & \textbf{取值/含义} \\
+\midrule
+1 & 0--3 & 格式指示 & 4 & 固定 1 \\
+2 & 4--6 & 资源配置子格式 & 3 & 固定 0 \\
+3 & 7--9 & 预留 & 3 & 全 0 \\
+4 & 10 & 第一资源收发 & 1 & 0 发；1 收 \\
+5 & 11--17 & 第一资源起始符号 & 7 & \#(数值)；单位随 TTI 缩放 \\
+6 & 18--21 & 第一资源端口数 $N_{G,\mathrm{port}}$ & 4 & 0=不配置 \\
+7 & 22--24 & 第一资源端口重复 $N_{G,\mathrm{port,rep}}$ & 3 & $2^v$ 符号/端口 \\
+8 & 25--29 & 第一资源波束数 $N_{G,\mathrm{bf}}$ & 5 & $2^v$；0=不配置 \\
+9 & 30--32 & 第一资源波束重复 & 3 & $2^v$ \\
+10 & 33 & 第一资源切换间隔 & 1 & 0 不需要；1 需要 \\
+11 & 34 & 第二资源收发 & 1 & 0 发；1 收 \\
+12 & 35--41 & 第二资源起始符号 & 7 & 同第一资源 \\
+13 & 42--45 & 第二资源端口数 $N_{T,\mathrm{port}}$ & 4 & 0=不配置 \\
+14 & 46--48 & 第二资源端口重复 & 3 & $2^v$ \\
+15 & 49--53 & 第二资源波束数 $N_{T,\mathrm{bf}}$ & 5 & $2^v$ \\
+16 & 54--56 & 第二资源波束重复 & 3 & $2^v$ \\
+17 & 57 & 第二资源切换间隔 & 1 & 0/1 \\
+18 & 58--81 & CRC24B+掩码 & 24 & \texttt{positioningResourceIndicationMASK} \\
+\bottomrule
+\end{longtable}
+\normalsize
+
+\subsubsection{6.2.4.6.6 位置/感知资源指示——子格式 1（82\,bit，单端口双边三信号）}
+
+\footnotesize
+\begin{longtable}{@{}clllL{5.2cm}@{}}
+\caption{比特表 14\quad 位置测量资源指示（子格式 1）} \\
+\toprule
+\textbf{序} & \textbf{累计 bit} & \textbf{字段} & \textbf{宽} & \textbf{取值/含义} \\
+\midrule
+1 & 0--3 & 格式指示 & 4 & 1 \\
+2 & 4--6 & 子格式 & 3 & 1 \\
+3 & 7--9 & 预留 & 3 & 0 \\
+4 & 10 & 三信号收发模式 & 1 & 0 发-收-发；1 收-发-收 \\
+5 & 11--17 & 第一信号起始符号 & 7 & --- \\
+6 & 18--22 & 第一信号波束数 $N_{m1,\mathrm{bf}}$ & 5 & $2^v$ \\
+7 & 23--25 & 第一信号波束重复 & 3 & $2^v$ \\
+8 & 26 & 第一信号切换间隔 & 1 & 0/1 \\
+9 & 27--33 & 第二信号起始符号 & 7 & --- \\
+10 & 34--38 & 第二信号波束数 & 5 & $2^v$ \\
+11 & 39--41 & 第二信号波束重复 & 3 & $2^v$ \\
+12 & 42 & 第二/三信号切换间隔 & 1 & 0 不需要；1 需要 \\
+13 & 43--49 & 第三信号起始符号 & 7 & --- \\
+14 & 50--54 & 第三信号波束数 & 5 & $2^v$ \\
+15 & 55--57 & 第三信号波束重复 & 3 & $2^v$ \\
+16 & 58--81 & CRC24B+掩码 & 24 & 同比特表\,13 \\
+\bottomrule
+\end{longtable}
+\normalsize
+
+\subsubsection{6.2.4.6.6 位置/感知资源指示——子格式 2（82\,bit，多端口双边三信号）}
+
+\footnotesize
+\begin{longtable}{@{}clllL{5.2cm}@{}}
+\caption{比特表 15\quad 位置测量资源指示（子格式 2）} \\
+\toprule
+\textbf{序} & \textbf{累计 bit} & \textbf{字段} & \textbf{宽} & \textbf{取值/含义} \\
+\midrule
+1 & 0--3 & 格式指示 & 4 & 1 \\
+2 & 4--6 & 子格式 & 3 & 2 \\
+3 & 7--8 & 预留 & 2 & 0 \\
+4 & 9 & 三信号收发模式 & 1 & 0 发-收-发；1 收-发-收 \\
+5 & 10--16 & 第一信号起始符号 & 7 & --- \\
+6 & 17--23 & 第三信号起始符号 & 7 & --- \\
+7 & 24--26 & 第一/三信号端口数 & 3 & 0=不配置 \\
+8 & 27--28 & 第一/三信号端口重复 & 2 & $2^{v+1}$ \\
+9 & 29--33 & 第一/三信号波束数 & 5 & $2^v$ \\
+10 & 34--36 & 第一/三信号波束重复 & 3 & $2^v$ \\
+11 & 37 & 切换间隔指示 & 1 & 0/1 \\
+12 & 38--44 & 第二信号起始符号 & 7 & --- \\
+13 & 45--47 & 第二信号端口数 & 3 & --- \\
+14 & 48--49 & 第二信号端口重复 & 2 & $2^{v+1}$ \\
+15 & 50--54 & 第二信号波束数 & 5 & $2^v$ \\
+16 & 55--57 & 第二信号波束重复 & 3 & $2^v$ \\
+17 & 58--81 & CRC24B+掩码 & 24 & 同比特表\,13 \\
+\bottomrule
+\end{longtable}
+\normalsize
+
+\subsubsection{6.2.4.6.6 位置/感知资源指示——子格式 3（82\,bit，测量组激活/去激活）}
+
+\footnotesize
+\begin{longtable}{@{}clllL{5.2cm}@{}}
+\caption{比特表 16\quad 位置测量资源指示（子格式 3）} \\
+\toprule
+\textbf{序} & \textbf{累计 bit} & \textbf{字段} & \textbf{宽} & \textbf{取值/含义} \\
+\midrule
+1 & 0--3 & 格式指示 & 4 & 1 \\
+2 & 4--6 & 子格式 & 3 & 3 \\
+3 & 7--12 & 预留 & 6 & 0 \\
+4 & 13--57 & 测量组激活/去激活 & 45 & 3$\times$15\,bit：8\,bit ID + 1\,bit 激/去活 + 2\,bit 时间差报告类型 + 4\,bit 预留 \\
+5 & 58--81 & CRC24B+掩码 & 24 & 测量组组播地址掩码 \\
+\bottomrule
+\end{longtable}
+\normalsize
+
+\subsubsection{6.2.4.6.7 T 链路位置测量资源指示（85\,bit）}
+
+\footnotesize
+\begin{longtable}{@{}clllL{5.4cm}@{}}
+\caption{比特表 17\quad T 链路位置测量信号资源指示信息} \\
+\toprule
+\textbf{序} & \textbf{累计 bit} & \textbf{字段} & \textbf{宽} & \textbf{取值/含义} \\
+\midrule
+1 & 0--3 & 时间资源 & 4 & 每锚点发送时间差报告的 TTI 数 \\
+2 & 4--6 & DMRS 端口数 & 3 & 数值$+1$ \\
+3 & 7--22 & 子载波组指示 & 16 & 位图对应子载波组 \\
+4 & 23--32 & 起始符号 & 10 & TTI 内起始符号索引 \\
+5 & 33--42 & 结束符号 & 10 & TTI 内结束符号索引 \\
+6 & 43--44 & HARQ 进程 & 2 & --- \\
+7 & 45 & 新包指示 & 1 & --- \\
+8 & 46--50 & MCS & 5 & 单 TB 或两 TB 时第一 TB \\
+9 & 51--53 & 符号重复 & 3 & --- \\
+10 & 54--55 & RV & 2 & 0--3 \\
+11 & 56--60 & ACK 资源池 & 5 & 高层配置多池中选一 \\
+12 & 61--84 & CRC24B+加扰 & 24 & 测量组组播地址 Phy-ID \\
+\bottomrule
+\end{longtable}
+\normalsize
+
+%---- 三、直通链路控制信息 ---------------------------------------------
+\subsection{直通链路控制信息（P-PCIB，6.2.4.8）}
+
+\subsubsection{6.2.4.8 直通链路动态调度数据控制信息（82\,bit）}
+
+\footnotesize
+\begin{longtable}{@{}clllL{5.4cm}@{}}
+\caption{比特表 18\quad 直通链路动态调度数据控制信息} \\
+\toprule
+\textbf{序} & \textbf{累计 bit} & \textbf{字段} & \textbf{宽} & \textbf{取值/含义} \\
+\midrule
+1 & 0--18 & COT 起始无线帧索引 & 19 & COT 首帧索引 \\
+2 & 19--28 & 起始符号指示 & 10 & COT 内起始符号 \\
+3 & 29--38 & 结束符号指示 & 10 & COT 内结束符号 \\
+4 & 39--46 & 数据包序号 $N_{\mathrm{TB}}$ & 8 & TB 序号 \\
+5 & 47--51 & MCS 指示 & 5 & --- \\
+6 & 52--57 & 预留 & 6 & 全 0 \\
+7 & 58--81 & CRC24B+加扰 & 24 & 先发节点 Phy-ID \\
+\bottomrule
+\end{longtable}
+\normalsize
+
+%---- 四、T 链路控制信息 TCI -------------------------------------------
+\subsection{T 链路控制信息 TCI（6.2.4.10）}
+
+\subsubsection{6.2.4.10.1 单级 HARQ 反馈信息}
+
+\footnotesize
+\begin{longtable}{@{}clllL{5.4cm}@{}}
+\caption{比特表 19\quad 单级 HARQ 反馈信息（数据方式：有效$+$\textbf{CRC24}）} \\
+\toprule
+\textbf{序} & \textbf{累计 bit} & \textbf{字段} & \textbf{宽} & \textbf{取值/含义} \\
+\midrule
+1 & 0--($N_1{-}1$) & ACK/NACK 反馈 & $N_1$ & TB 模式 $N_1{=}1$；CBG 模式由 \texttt{singleStageCBGNumber} 配置；1=ACK，0=NACK \\
+2 & $N_1$--($N_1{+}N_2{-}1$) & MCS 调整量 & $N_2$ & 由 \texttt{mcsOffsetFeedbackBits} 配置；语义依 ACK/NACK 与 TB/CBG 模式 \\
+3 & 末 24 & CRC24B & 24 & 仅数据方式；序列方式无 CRC \\
+\bottomrule
+\end{longtable}
+\normalsize
+
+\subsubsection{6.2.4.10.2 两级 HARQ 反馈信息}
+
+\footnotesize
+\begin{longtable}{@{}clllL{5.4cm}@{}}
+\caption{比特表 20\quad 两级 HARQ 反馈信息（均仅数据方式）} \\
+\toprule
+\textbf{类型} & \textbf{累计 bit} & \textbf{字段} & \textbf{宽} & \textbf{取值/含义} \\
+\midrule
+一级 & 0--($N_{S1}{-}1$) & 第一级 CBG ACK/NACK & $N_{S1}{-}Z$ & $N_{S1}{=}$\texttt{firstStageBits} \\
+一级 & --- & MCS 调整量 & $Z$ & $Z{=}$\texttt{mcsOffsetFeedbackBits} \\
+一级 & 末 24 & CRC24B & 24 & --- \\
+二级 & 0--($N_{S2}{-}1$) & 第二级子 CBG ACK/NACK & $N_{S2}$ & $N_{S2}{=}$\texttt{secondStageBits} \\
+二级 & 末 24 & CRC24B & 24 & 调制：G 数据$\leq$16QAM 用 QPSK，否则 16QAM \\
+\bottomrule
+\end{longtable}
+\normalsize
+
+\subsubsection{6.2.4.10.3 CQI 反馈信息}
+
+\footnotesize
+\begin{longtable}{@{}clllL{5.4cm}@{}}
+\caption{比特表 21\quad CQI 反馈信息（两种反馈模式）} \\
+\toprule
+\textbf{模式} & \textbf{累计 bit} & \textbf{字段} & \textbf{宽} & \textbf{取值/含义} \\
+\midrule
+按基础载波 & 0--($4N_{\mathrm{CH}}{-}1$) & 信道质量指示 & $4N_{\mathrm{CH}}$ & 每 4\,bit 指示一基础载波参考 MCS 索引 $2M{+}1$ \\
+按子载波组 & 0--($64N_{\mathrm{CH}}/L_{\mathrm{CH}}{-}1$) & 信道质量指示 & $64N_{\mathrm{CH}}/L_{\mathrm{CH}}$ & 每 4\,bit 指示一 G 工作子载波组 \\
+共用 & 末 16 & CRC16 & 16 & $g_{\mathrm{CRC16}}(D)$；$N_{\mathrm{CH}},L_{\mathrm{CH}}$ 见 6.2.2.4 \\
+\bottomrule
+\end{longtable}
+\normalsize
+
+\subsubsection{6.2.4.10.4 调度请求信息（45\,bit）}
+
+\footnotesize
+\begin{longtable}{@{}clllL{5.4cm}@{}}
+\caption{比特表 22\quad 调度请求信息} \\
+\toprule
+\textbf{序} & \textbf{累计 bit} & \textbf{字段} & \textbf{宽} & \textbf{取值/含义} \\
+\midrule
+1 & 0--23 & T 节点标识 & 24 & 请求调度的 T 节点 ID \\
+2 & 24--28 & 预留 & 5 & 全 0 \\
+3 & 29--44 & CRC16 & 16 & $g_{\mathrm{CRC16}}(D)$ \\
+\bottomrule
+\end{longtable}
+\normalsize

@@ -1,0 +1,744 @@
+% !TEX program = xelatex
+\documentclass[11pt,a4paper]{ctexart}
+
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{longtable}
+\usepackage{array}
+
+\geometry{left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm}
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue}
+
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+
+\title{%
+  \textbf{星闪 SLB 物理层}\\[0.4em]
+  \Large 6.2.3 物理层信号技术文档\\[0.3em]
+  \large FTS/STS \textbullet\ SRS/CSI-RS \textbullet\ DMRS \textbullet\ PMS \textbullet\ 感知测量
+}
+\author{依据 T/XS 10001-2025《星闪无线通信系统 接入层\\
+同步低时延宽带空口 SLB 技术要求和测试方法》整理\\
+（团体标准 20250326 版）}
+\date{2026 年 7 月 6 日}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+%======================================================================
+\part{总览}
+%======================================================================
+
+\section{文档范围与模块划分}
+
+本文档对应 SLB 120\,kHz 物理层协议第 6.2.3 节``物理层信号''，涵盖 6.2.3.1\textasciitilde 6.2.3.10 全部子节。该节规定各类物理层辅助波形的\textbf{序列生成}、\textbf{RE 映射}与\textbf{功率关系}，输出复数值 $a_{k,l}^{(p)}$，是接收端同步、信道估计与解调的直接依据。
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{2.2cm}L{4.2cm}L{6.1cm}}
+\toprule
+\textbf{子节号} & \textbf{信号} & \textbf{核心输出/行为} \\
+\midrule
+6.2.3.1 & FTS / STS & ZC 型同步序列；SAB/RAB 符号 \#0/\#1/\#2 映射 \\
+6.2.3.2 & SRS & T 链路 $r_{n,l}(k)$；G 节点测上行信道 \\
+6.2.3.3 & CSI-RS & G 链路 $r_{n,l}(k)$；T 节点测下行信道 \\
+6.2.3.4 & G-DMRS-C & G 控制解调参考；\#6/\#0 固定映射 \\
+6.2.3.5 & P-DMRS-C & 直通控制解调参考；含 SAB 时 \#6 \\
+6.2.3.6 & DMRS-D & 数据解调参考；多端口/梳齿/周期映射 \\
+6.2.3.7 & T-DMRS-C & TCI 解调参考；与 T 控制同 RE \\
+6.2.3.8 & 相位调整信号 PAS & 数据帧首符号 $k_0,k_1$ 相位跟踪 \\
+6.2.3.9 & PMS / 安全位置测量 & ZC 型 PMS；KDF 加扰/时域拼接 \\
+6.2.3.10 & 感知参考 / 安全感知 & CSI-RS/SRS/PMS 复用；多天线置乱 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{与相关章节的关系}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{2.2cm}L{2.2cm}L{9.1cm}}
+\toprule
+\textbf{相关节号} & \textbf{关系} & \textbf{说明} \\
+\midrule
+6.2.1 & 上游 & 8 类逻辑信号分类；6.2.3 为波形级实现 \\
+6.2.2 & 上游 & RE 网格 $(k,l)_p$、G/T/D 符号类型、CP 参数 \\
+6.2.4 & 平行 & SAB 内 FTS/STS 位置与 $u$；预配置激活 SRS/CSI-RS \\
+6.2.5 & 下游 & DMRS-D/PAS 伴随数据 TB 解调 \\
+6.5.2/6.5.3 & 上游 & Gold 序列与 QPSK $r_{n,l}(k)$ 生成 \\
+6.5.4 & 平行 & 参考信号与数据/控制功率关系 \\
+6.6/6.7 & 下游 & 位置/感知测量流程使用 PMS 与安全信号 \\
+8.3 & 上游 & 多基础载波 PMS 中心频率 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{通用约定}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{符号/对象} & \textbf{含义} & \textbf{标准条款} \\
+\midrule
+$(k,l)_p$ & 超帧内第 $n$ 无线帧 RE 索引；$k{=}0,\ldots,160$ & 6.2.2.7 \\
+$a_{k,l}^{(p)}$ & RE 映射复数值；$a_{80,l}\equiv 0$ & 6.2.2.7 \\
+$r_{n,l}(k)$ & 伪随机 QPSK 序列；生成方式见 6.5.3 节 & 6.5.3 \\
+$d_{\mathrm{FTS}}/d_{\mathrm{STS}}/d(n)$ & ZC 型专用序列 & 6.2.3.1/6.2.3.9 \\
+链路前缀 & G/T/附/直通；无混淆可省略 & 6.1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+6.2.3.2\textasciitilde 6.2.3.8 中多数参考信号与相位调整信号均映射 $a_{k,l}=r_{n,l}(k)$（$k{\neq}80$）。标准明确规定：\textbf{$r_{n,l}(k)$ 为伪随机 QPSK 序列，生成方式见 6.5.3 节}。实现时须先按 6.5.2/6.5.3 生成序列，再写入 RE；不得硬编码固定导频图案。
+
+\newpage
+%======================================================================
+\part{6.2.3 物理层信号（工程解读）}
+%======================================================================
+
+\section{协议章节对应}
+
+本节对应 T/XS 10001-2025 第 6.2.3 节，完整涵盖 6.2.3.1\textasciitilde 6.2.3.10。
+
+\section{功能定义}
+
+6.2.3 为接收端提供\textbf{不承载高层用户比特}的物理层辅助波形，支撑：
+\begin{enumerate}[nosep]
+  \item \textbf{同步与识别}：FTS/STS 定时/频偏同步及节点标识（6.2.3.1）；
+  \item \textbf{信道估计}：SRS/CSI-RS/DMRS-C/D 上下行与控制/数据信道估计（6.2.3.2\textasciitilde 7）；
+  \item \textbf{相位跟踪}：PAS 跨符号相位补偿（6.2.3.8）；
+  \item \textbf{位置测量}：专用 PMS 及安全加扰测距波形（6.2.3.9）；
+  \item \textbf{感知测量}：感知参考信号及安全多天线置乱（6.2.3.10）。
+\end{enumerate}
+
+\section{模块边界（上下游及职责划分）}
+
+\subsection{上游模块}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{4cm}L{4.5cm}L{5.5cm}}
+\toprule
+\textbf{上游} & \textbf{输入} & \textbf{说明} \\
+\midrule
+6.2.2 帧结构 & 符号类型、$(k,l)$ 网格 & RE 坐标与 CP \\
+6.2.4 控制/调度 & 预配置激活、资源指示 & SRS/CSI-RS/PMS 触发 \\
+高层 RRC/XRC & \texttt{srs/csi/dmrs-Set-Conf} 等 & 梳齿/周期/端口配置 \\
+6.5.2/6.5.3 & Gold/QPSK 序列 & $r_{n,l}(k)$ \\
+安全层 & rand、KDF、保密参数 & 安全 PMS/感知 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{下游模块}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{4cm}L{4.5cm}L{5.5cm}}
+\toprule
+\textbf{下游} & \textbf{输出} & \textbf{说明} \\
+\midrule
+接收机同步 & FTS/STS 相关峰 & 粗/精同步、盲检 SAB \\
+信道估计/均衡 & DMRS/SRS/CSI-RS RE 值 & $H(k,l)$ 估计 \\
+6.2.4/6.2.5 解调 & 估计信道 & 控制/数据 QPSK 解调 \\
+6.6 位置测量 & PMS/安全 PMS 波形 & RTT/AoA 等 \\
+6.7 感知测量 & 感知参考/加扰信号 & 节点间感知处理 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{本模块不负责的内容}
+
+物理层控制/数据比特语义（6.2.4/6.2.5）、极化码信道编码（6.2.6）、基带 OFDM 合成（6.2.9）、射频发射（6.2.10）。
+
+\section{在 SLB 通信流程中的角色}
+
+6.2.3 处于 PHY \textbf{参考/同步信号生成层}：
+
+SAB 内 FTS/STS（6.2.4.2）$\rightarrow$ G-DMRS-C/P-DMRS-C 伴随控制盲检 $\rightarrow$ DMRS-D 伴随数据调度 $\rightarrow$ SRS/CSI-RS 闭环链路自适应 $\rightarrow$ PMS/感知信号按资源指示按需插入。
+
+%----------------------------------------------------------------------
+\section{关键参数与强制要求（提炼版）}
+%----------------------------------------------------------------------
+
+\subsection{信号类型与序列来源总表}
+
+\begin{longtable}{@{}>{\small}L{2.2cm}>{\small}L{3.2cm}>{\small}L{2.2cm}>{\small}L{2.8cm}>{\small}L{2.8cm}>{\small}L{1.5cm}@{}}
+\caption{物理层信号关键参数总览} \\
+\toprule
+\textbf{信号} & \textbf{序列/公式} & \textbf{链路/符号} & \textbf{典型 RE/符号位置} & \textbf{功率参考} & \textbf{条款} \\
+\midrule
+\endfirsthead
+\multicolumn{6}{c}{\small（续表）} \\
+\toprule
+\textbf{信号} & \textbf{序列/公式} & \textbf{链路/符号} & \textbf{典型 RE/符号位置} & \textbf{功率参考} & \textbf{条款} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+FTS &
+$d_{\mathrm{FTS}}(k)$，ZC 型 &
+G/直通 &
+SAB/RAB \#1,\#2；双符号 &
+--- &
+6.2.3.1.1 \\
+STS &
+$2\sqrt{2}\,d_{\mathrm{STS}}(k)$，梳状 &
+G/直通 &
+SAB/RAB \#0；单符号 &
+与 FTS 匹配 &
+6.2.3.1.2 \\
+SRS &
+$r_{n,l}(k)$ &
+T 链路 &
+\texttt{srs-Set-Conf} 梳齿 &
+--- &
+6.2.3.2 \\
+CSI-RS &
+$r_{n,l}(k)$ &
+G 链路 &
+G-PCIB 后或 STS 后首符号 &
+--- &
+6.2.3.3 \\
+G-DMRS-C &
+$r_{n,l}(k)$ &
+G 符号 &
+含 SAB：TTI 首帧 \#6；无 SAB：\#0 &
+= G 控制 &
+6.2.3.4 \\
+P-DMRS-C &
+$r_{n,l}(k)$ &
+D 符号 &
+含 SAB：TTI 首帧 \#6 &
+= 直通控制 &
+6.2.3.5 \\
+DMRS-D &
+$r_{n,l}(k)$ &
+G/T/D/附 &
+调度数据符号内 $N$ 连续符号 &
+= 数据 &
+6.2.3.6 \\
+T-DMRS-C &
+$r_{n,l}(k)$ &
+T 符号 &
+TCI 首符号；与 TCI 同梳齿 &
+= T 控制 &
+6.2.3.7 \\
+PAS &
+$r_{n,l}(k)$ 在 $k_0,k_1$ &
+数据链路 &
+数据帧首符号；端口 \#0 &
+--- &
+6.2.3.8 \\
+PMS &
+$d(n)$，$u{\in}[3,20]$ &
+G/T &
+资源指示调度符号 &
+--- &
+6.2.3.9.1 \\
+安全 PMS &
+KDF 加扰 $r_{n,l}$ 或表 5 拼接 &
+G/T &
+测距符号 &
+--- &
+6.2.3.9.2 \\
+感知参考 &
+CSI-RS/SRS/PMS 复用 &
+G/T &
+感知资源指示 &
+--- &
+6.2.3.10.1 \\
+安全感知 &
+$X_i^p = X_0^p e^{j(\rho_i+\phi_i^p)}$ &
+T（$N_t{\geq}2$） &
+感知事件分时段 &
+--- &
+6.2.3.10.2 \\
+\end{longtable}
+
+\subsection{FTS/STS 序列与标识 $u$（6.2.3.1）}
+
+\textbf{FTS 序列}（$n{\neq}80$）：
+\begin{equation}
+d_{\mathrm{FTS}}(n) = e^{-j\pi u\, n (n+1) / 161}
+\end{equation}
+映射：$a_{k,l} = d_{\mathrm{FTS}}(k)$；连续两符号，首符号 CP 加倍、次符号无 CP。
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{cll}
+\toprule
+\textbf{$u$} & \textbf{场景} & \textbf{条件} \\
+\midrule
+1 & 通信域 SAB FTS & 符号类型一 A/B 或类型四 \\
+160 & 通信域 SAB FTS & 符号类型二或三 \\
+2 & 通信域 RAB FTS & 竞争接入 \\
+159 & 直通 SAB FTS & 直通链路 \\
+\bottomrule
+\end{tabular}
+\caption{FTS 标识 $u$（见 6.2.3.1.1、6.2.4.2）}
+\end{table}
+
+\textbf{STS 序列}（$n \bmod 8 = 0$ 且 $n{\neq}80$）：
+\begin{equation}
+d_{\mathrm{STS}}(n) = e^{-j\pi u\, (n/8)\, \bigl((n/8)+1\bigr) / 21}
+\end{equation}
+映射：$a_{k,l} = 2\sqrt{2}\, d_{\mathrm{STS}}(k)$；单符号。$u = 1,\ldots,16$，为 G-ID 或先发节点 ID 低 4 位 $+1$。
+
+\subsection{FTS/STS 与 SAB 符号布局（6.2.4.2 衔接）}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{场景} & \textbf{\#0} & \textbf{\#1,\#2} & \textbf{备注} \\
+\midrule
+通信域 SAB & STS & FTS & FTS $u{=}1$ 或 $160$ \\
+直通 SAB & STS & FTS & FTS $u{=}159$ \\
+RAB 接入 & STS & FTS & FTS $u{=}2$ \\
+无 SAB 载波 & STS & --- & 该帧 \#0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{伪随机 QPSK 序列 $r_{n,l}(k)$（6.5.3）}
+
+6.2.3.2\textasciitilde 8 及 6.2.4 TCI 序列方式等场景共用 $r_{n,l}(k)$。标准定义（见 6.5.3 节）：
+\begin{equation}
+r_{n,l}(m) = \frac{1}{\sqrt{2}}\bigl(2c(2m)-1\bigr) + j\frac{1}{\sqrt{2}}\bigl(2c(2m{+}1)-1\bigr), \quad m=0,1,\ldots,160
+\end{equation}
+其中 $c(i)$ 为 6.5.2 节 31 阶 Gold 伪随机序列；初始化参数
+\begin{equation}
+c_{\mathrm{init}} = 2^{10}\bigl(15(n{+}1)+l{+}1\bigr)(4N_{\mathrm{ID}}{+}1) + 4N_{\mathrm{ID}} + N_{\mathrm{CP}}
+\end{equation}
+\begin{table}[h]
+\centering
+\small
+\caption{$r_{n,l}(k)$ 生成参数（见 6.5.3）}
+\begin{tabular}{lll}
+\toprule
+\textbf{参数} & \textbf{取值/含义} & \textbf{说明} \\
+\midrule
+$n$ & $0,\ldots,7$ & 超帧内无线帧号 \\
+$l$ & 依符号类型 & 类型一 A/B: $0,\ldots,13$；二: $0,\ldots,12$；三: $0,\ldots,11$；四: $0,\ldots,9$ \\
+$N_{\mathrm{ID}}$ & G 节点标识低 8 位 & 区分小区/组 \\
+$N_{\mathrm{CP}}$ & $0,1,2,3$ & 类型一 A/B$\rightarrow$3；二$\rightarrow$2；三$\rightarrow$1；四$\rightarrow$0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{映射到 RE}：6.2.3 各子节以 $r_{n,l}(k)$ 直接赋值 $a_{k,l}$（$k$ 为子载波索引，与公式中 $m$ 对应）；DC 子载波 $k{=}80$ 恒为 0。
+
+\subsection{参考信号类通用映射规则（SRS/CSI-RS/DMRS/PAS）}
+
+单天线端口：
+\begin{equation}
+a_{k,l} = r_{n,l}(k), \quad k=0,1,\ldots,78,79,81,82,\ldots,160;\quad a_{80,l}=0
+\end{equation}
+多天线端口：仅配置端口 $p_0$ 映射 $r_{n,l}(k)$，$p{\neq}p_0$ 或 $k{=}80$ 时 $a_{k,l}^{(p)}{=}0$。上述规则在 6.2.3.2\textasciitilde 8 各子节中均注明``$r_{n,l}(k)$ 为伪随机 QPSK 序列，生成方式见 6.5.3 节''。
+
+\subsection{DMRS-D 端口与周期（6.2.3.6）}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{参数} & \textbf{取值/规则} & \textbf{配置来源} \\
+\midrule
+$N_{\mathrm{comb}}$ & 1（连续）或 2（梳齿） & \texttt{dmrs-D-*LinkDataSetConf}；默认 1 \\
+$N$（DMRS 符号数） & $N_{\mathrm{port}}/N_{\mathrm{comb}}$ & 高层端口数 \\
+端口分配 & 第 $M$ 符号端口 $[M N_{\mathrm{comb}},\, M N_{\mathrm{comb}}+N_{\mathrm{comb}})$ & $M{\in}[0,N)$ \\
+G/T 时域周期 & \texttt{DMRS-TimeGranularity}；默认 1 无线帧 & 高层 \\
+跨 SAB 载波 & 时域起点以\textbf{含 SAB} 载波为准 & 6.2.3.6 \\
+直通周期 & 1 无线帧 & 6.2.3.6 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{PMS 与多载波拼接（6.2.3.9，摘要）}
+
+单载波 PMS：$d(n)$ 为 ZC 型序列，$u{\in}[3,20]$。多载波时域拼接及安全加扰详见 \S6.2.3.9；完整表 5 见该节。
+
+%----------------------------------------------------------------------
+\section{本节核心详解（6.2.3.2\textasciitilde 6.2.3.10）}
+%----------------------------------------------------------------------
+
+\subsection{6.2.3.2 信道探测信号 SRS}
+
+\textbf{功能}：T 节点主动上行探测；G 节点测量 T$\rightarrow$G 信道，用于上行调度与链路适配。
+
+\textbf{链路/符号}：T 链路符号（6.2.2.2）。
+
+\textbf{配置与激活}：时频资源由高层 \texttt{srs-Set-Conf} 配置；由预配置调度激活去激活信息（6.2.4.6.2）激活后方发送。
+
+\textbf{序列与映射}：$a_{k,l}^{(p)}=r_{n,l}(k)$（$k{\neq}80$，$p{=}p_0$）；\textbf{$r_{n,l}(k)$ 为伪随机 QPSK 序列，生成方式见 6.5.3 节}。
+
+\textbf{频域资源}：工作子载波组由预配置激活信息中频域资源指示确定；梳齿子载波由 \texttt{srs-Set-Conf} 配置。
+
+\textbf{流程上下文}：接入后链路优化；与 CSI-RS 形成上下行互补（SRS 测上行，CSI-RS 供下行 CQI）。
+
+\subsection{6.2.3.3 信道状态信息参考信号 CSI-RS}
+
+\textbf{功能}：G 节点发送下行参考；T 节点测量 G$\rightarrow$T 信道并生成 CQI（6.2.4.10.3）。
+
+\textbf{链路/符号}：G 链路符号。
+
+\textbf{配置与激活}：\texttt{csi-RS-Set-Conf} 配置；预配置调度激活去激活信息激活。
+
+\textbf{序列与映射}：与 SRS 相同，$a_{k,l}^{(p)}=r_{n,l}(k)$；\textbf{生成方式见 6.5.3 节}。
+
+\textbf{时域起始符号}（按基础载波类型）：
+\begin{itemize}[nosep]
+  \item 含 SAB 的基础载波：G-PCIB 之后的第一个符号；
+  \item 不含 SAB：若 TTI 首符号为 STS（6.2.4.2）则 STS 后第一个符号，否则 TTI 首符号。
+\end{itemize}
+
+\textbf{频域资源}：工作子载波组由预配置频域指示；梳齿由 \texttt{csi-RS-Set-Conf} 配置。不同基础载波上 CSI-RS 时域资源可不同。
+
+\subsection{6.2.3.4 G 链路公共解调参考信号 G-DMRS-C}
+
+\textbf{功能}：为 G 链路物理层控制信息（G-PCIB 内 GCI）提供公共信道估计。
+
+\textbf{时域映射}：
+\begin{itemize}[nosep]
+  \item 含 SAB 的 TTI：该 TTI 第一个无线帧的 \textbf{\#6 符号}；
+  \item 不含 SAB 的 TTI：该 TTI 第一个无线帧的 \textbf{\#0 符号}；
+  \item \textbf{约束}：不含 SAB 的基础载波上不映射 G-DMRS-C。
+\end{itemize}
+
+\textbf{序列与映射}：$a_{k,l}=r_{n,l}(k)$；\textbf{$r_{n,l}(k)$ 为伪随机 QPSK 序列，生成方式见 6.5.3 节}。
+
+\textbf{功率}：子载波平均发送功率与 G 链路物理层控制信息相同（6.5.4）。
+
+\textbf{流程上下文}：G-PCIB 盲检/解调前或并行接收；与 SAB 存在性绑定。
+
+\subsection{6.2.3.5 直通链路公共解调参考信号 P-DMRS-C}
+
+\textbf{功能}：为直通链路物理层控制信息（P-PCIB）提供公共信道估计；功能类比 G-DMRS-C。
+
+\textbf{时域映射}：含 SAB 的基础载波上，每个含 SAB 的 TTI 内映射于该 TTI 第一个无线帧的 \textbf{\#6 符号}。
+
+\textbf{序列与映射}：$a_{k,l}=r_{n,l}(k)$；\textbf{生成方式见 6.5.3 节}。
+
+\textbf{功率}：与直通链路物理层控制信息子载波平均功率相同（6.5.4）。
+
+\subsection{6.2.3.6 数据信息解调参考信号 DMRS-D}
+
+\textbf{功能}：G 发 G 链路 DMRS-D 供 T 估计下行数据信道；T 发 T 链路 DMRS-D 供 G 估计上行数据信道。
+
+\textbf{频域发送方式}：
+\begin{itemize}[nosep]
+  \item 连续子载波：子载波平均功率与数据符号相同；
+  \item 梳齿子载波（$N_{\mathrm{comb}}{=}2$）：偶数端口用偶数子载波，奇数端口用奇数子载波。
+\end{itemize}
+
+\textbf{多符号/多端口}：每组 DMRS 占连续 $N=N_{\mathrm{port}}/N_{\mathrm{comb}}$ 个符号；第 $M$ 符号传输端口 $[M N_{\mathrm{comb}},\, M N_{\mathrm{comb}}+N_{\mathrm{comb}})$，$M{\in}[0,N)$。
+
+\textbf{序列与映射}：$a_{k,l}^{(p)}=r_{n,l}(k)$（$k{\neq}80$）；\textbf{生成方式见 6.5.3 节}。
+
+\textbf{时域周期}：G/T 链路从调度首符号起按 \texttt{DMRS-TimeGranularity} 周期映射；默认周期 = 1 无线帧。跨含/不含 SAB 载波调度时，两种载波均以\textbf{含 SAB 载波}调度首符号为时域起点。直通链路每载波以 1 无线帧为周期。
+
+\textbf{附链路}：DMRS-D 资源见 6.2.5.4 / 6.2.3.6 附链路条款。
+
+\subsection{6.2.3.7 T 链路控制信息解调参考信号 T-DMRS-C}
+
+\textbf{功能}：为 T 链路控制信息 TCI（HARQ/CQI/SR）提供上行信道估计。
+
+\textbf{资源配置}：由 \texttt{dedicatedACK-ResourceSetConf} 指示；映射于 TCI 发送符号的\textbf{第一个符号}；频域梳齿集合与 TCI \textbf{完全相同}。
+
+\textbf{序列与映射}：$a_{k,l}=r_{n,l}(k)$；\textbf{$r_{n,l}(k)$ 为伪随机 QPSK 序列，生成方式见 6.5.3 节}。
+
+\textbf{功率}：子载波平均功率与 T 链路控制信息相同；按可用梳齿占有效子载波比例做 power boosting（6.2.4.10）。
+
+\subsection{6.2.3.8 物理层数据信息相位调整信号 PAS}
+
+\textbf{功能}：G 发 G 链路 PAS 供 T 跟踪下行数据相位；G 收 T 链路 PAS 跟踪上行数据相位（频偏残留、预编码相位等）。
+
+\textbf{映射条件}：被调度 \#0 天线端口；\textbf{除含 DMRS-D 的无线帧外}，每个被调度无线帧的\textbf{第一个符号}上：
+\begin{itemize}[nosep]
+  \item $k_0$：被调度最小子载波组中\textbf{最大}子载波；
+  \item $k_1$：被调度最大子载波组中\textbf{最小}子载波。
+\end{itemize}
+
+\textbf{序列与映射}：
+\begin{equation}
+a_{k,l}^{(p)} = \begin{cases} r_{n,l}(k), & k=k_0,k_1 \;\text{且}\; p=0 \\ 0, & \text{其他} \end{cases}
+\end{equation}
+\textbf{$r_{n,l}(k)$ 为伪随机 QPSK 序列，生成方式见 6.5.3 节}。
+
+\subsection{6.2.3.9 位置测量信号}
+
+\subsubsection{6.2.3.9.1 专用位置测量信号 PMS}
+
+\textbf{功能}：节点间测距与定位（RTT、AoA 等）；由 6.2.4.6.6/6.7 位置测量资源指示调度时频资源。
+
+\textbf{单基础载波序列}（$u{\in}[3,20]$，G 节点按端口配置；$n{=}80$ 为 DC，不发送）：
+\begin{equation}
+d(n) = \begin{cases}
+e^{-j\pi u\, n (n+1) / 161}, & n=0,\ldots,79 \\[0.2em]
+0, & n=80 \\[0.2em]
+e^{-j\pi u\, n (n+1) / 161}, & n=81,\ldots,160
+\end{cases}
+\end{equation}
+
+\textbf{多基础载波}：各基础载波频域信号相同；可组合 2/3/4/5/8/10/16 个基础载波（40/60/80/100/160/200/320\,MHz），中心频率见 8.3 节。
+
+\textbf{可用信号类型}（位置信息测量）：
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{发送节点} & \textbf{可用信号} & \textbf{标准条款} \\
+\midrule
+G 节点 & PMS 或 CSI-RS & 6.2.3.9.1 \\
+T 节点 & PMS 或 SRS & 6.2.3.9.1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{6.2.3.9.2 安全位置测量信号}
+
+G 节点可配置 T 节点使用基于 CSI-RS 或 SRS 的安全位置测量信号。
+
+\textbf{第一种模式（频域加扰）}：产生 1 个或多个基础载波的 CSI-RS/SRS，对每符号 160 个有效子载波加扰。单天线端口步骤：
+\begin{enumerate}[nosep]
+  \item 按 CSI-RS 规则生成 $a_{k,l}=r_{n,l}(k)$（$k{\neq}80$）；$r_{n,l}(k)$ 由 Gold 序列 $c(i)$ 经 6.5.3 生成；
+  \item KDF 随机序列 $=\mathrm{KDF}(\mathrm{rand}, \mathrm{COUNTER}_r, \text{最低基础载波信道号}, \mathrm{counter})$；rand 为 128 bit；$\mathrm{COUNTER}_r$ 为位置测量符号序号（首符号为 0）；
+  \item 按信道频率从小到大，KDF 序列对 $c(i)$ 逐比特异或得 $D(j)$；
+  \item 用 $D(j)$ 生成随机 QPSK 序列调制各有效子载波。
+\end{enumerate}
+
+\begin{table}[h]
+\centering
+\small
+\caption{安全 PMS 第一种模式：counter 与基础载波数（见 6.2.3.9.2）}
+\begin{tabular}{lll}
+\toprule
+\textbf{基础载波数} & \textbf{有效子载波规模} & \textbf{counter 取值} \\
+\midrule
+1 & 160 & 0 \\
+2\textasciitilde 3 & 160\textasciitilde 512 & 0, 1 \\
+4 & 640 & 0, 1, 2 \\
+5\textasciitilde 6 & 768\textasciitilde 1024 & 0, 1, 2, 3 \\
+8 & 1280 & 0, 1, 2, 3, 4 \\
+10 & 1600 & 0,\ldots, 6 \\
+12 & 1920 & 0,\ldots, 7 \\
+25 & 4000 & 0,\ldots, 15 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{第二种模式（时域多段拼接）}：第一种模式单载波信号 IFFT 得时域段 $a$；$a^*$ 为共轭，$b$ 为对称，$b^*$ 为 $b$ 共轭；按表 5 拼接后按 6.2.2.1 加 CP：
+
+\begin{table}[h]
+\centering
+\small
+\caption{表 5\quad 不同带宽下多基础载波位置测量信号配置（见 6.2.3.9.2）}
+\begin{tabular}{ll}
+\toprule
+\textbf{多基础载波占用带宽} & \textbf{多段信号序列组成方式} \\
+\midrule
+2 基础载波（40\,MHz） & $[a\;\; b^*]$ \\
+3 基础载波（60\,MHz） & $[a\;\; a\;\; b^*]$ \\
+4 基础载波（80\,MHz） & $[a\;\; b\;\; a^*\;\; b^*]$ \\
+5 基础载波（100\,MHz） & $[a\;\; b\;\; a\;\; a^*\;\; b^*]$ \\
+6 基础载波（120\,MHz） & $[a\;\; b\;\; a\;\; b^*\;\; a^*\;\; b^*]$ \\
+8 基础载波（160\,MHz） & $[a\;\; b\;\; a^*\;\; b^*]$ \\
+10 基础载波（200\,MHz） & $[a\;\; b\;\; a\;\; b\;\; a\;\; b^*\;\; a^*\;\; b^*\;\; a^*\;\; b^*]$ \\
+16 基础载波（320\,MHz） & $[a\;\; b\;\; a^*\;\; b^*]$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{6.2.3.10 感知测量信号}
+
+\subsubsection{6.2.3.10.1 感知参考信号}
+
+\textbf{功能}：节点间感知测量；由 6.2.4.6.6 感知测量信号资源指示信息调度时频资源。
+
+\textbf{可用信号}：
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{发送节点} & \textbf{可用感知参考} & \textbf{标准条款} \\
+\midrule
+G 节点 & CSI-RS 或 PMS & 6.2.3.10.1 \\
+T 节点 & SRS 或 PMS & 6.2.3.10.1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+感知参考信号复用 6.2.3.2/6.2.3.3/6.2.3.9.1 的波形生成与映射规则，仅在资源指示所指定的无线帧符号时频位置上发送。
+
+\subsubsection{6.2.3.10.2 安全感知测量信号}
+
+\textbf{安全要求}：T 节点须至少配置 $N_t\geq 2$ 根天线；一根发感知参考信号，另一根发加扰信号。加扰信号 $=$ 感知参考 $\times$ 恒模随机信号，仅授权 G/T 节点可获得。
+
+\textbf{事件结构}：感知过程含 $S$ 个感知测量事件；事件间隔 $T$；第 $n$ 个事件分为 $P\geq N_t$ 个连续时间段。时段 $p$ 内：
+\begin{itemize}[nosep]
+  \item 天线 $i{=}p$：发送感知参考 $X_p^p(k,n)$；
+  \item 天线 $i{\neq}p$：发送加扰信号 $X_i^p(k,n)=X_0^p(k,n)\,e^{j(\rho_i(k,n)+\phi_i^p)}$；
+  \item $\phi_i^p = 2\pi p i / (N_t(N_t{-}1))$，$i,p=0,\ldots,N_t{-}1$。
+\end{itemize}
+
+$N_t$ 个天线 $\times$ $N_t$ 个时段的发送信号组成矩阵 $X(k,n)$（标准给出完整 $N_t\times N_t$ 矩阵形式）。当 $P>N_t$ 时，后 $P{-}N_t$ 时段重复前面时段信号。
+
+\textbf{置乱数同步}（表 6）：
+\begin{table}[h]
+\centering
+\small
+\caption{表 6\quad 置乱数同步方式（见 6.2.3.10.2）}
+\begin{tabular}{ll}
+\toprule
+\textbf{方式} & \textbf{说明} \\
+\midrule
+方式一 & G 配置保密参数；G/T 各自生成置乱函数 $\theta_{i,k}^p(t)$（Hermite 插值），采样得 $\rho_i^p(k,n)=\theta_{i,k}^p(t_0+nT)$ \\
+方式二 & G 直接配置各感知测量事件的置乱数 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{方式一要点}：感知过程持续 $ST$（$S$ 个事件、间隔 $T$）；每子载波 $k$ 配置 $M$ 个 $[0,2\pi)$ 均匀随机数；三次 Hermite 插值得 $\theta_{i,k}^p(t)$，限幅至 $[0,2\pi]$。
+
+% 保留 6.2.3.1 简述（同步信号已在 B1 详述）
+\subsection{6.2.3.1 同步信号 FTS/STS（摘要）}
+
+FTS/STS 采用 ZC 型专用序列（非 $r_{n,l}$），详见本节 B1 与 6.2.4.2 SAB/RAB 符号布局。FTS 双符号（首 CP 加倍、次无 CP）；STS 单符号、功率 $2\sqrt{2}$ 缩放。
+
+%----------------------------------------------------------------------
+\section{数据类型、长度与维度}
+%----------------------------------------------------------------------
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{对象} & \textbf{维度/取值} & \textbf{单位} & \textbf{条款} \\
+\midrule
+FTS/STS 子载波 & $k{=}0,\ldots,160$；STS 梳齿间隔 8 & 子载波 & 6.2.3.1 \\
+FTS $u$ & $\{1,2,160,159\}$ & 标识 & 6.2.3.1.1 \\
+STS $u$ & $1,\ldots,16$ & 标识 & 6.2.3.1.2 \\
+$r_{n,l}(k)$ 有效 $k$ & $0,\ldots,79,81,\ldots,160$ & 子载波 & 6.2.3.2 等 \\
+DMRS-D 符号组 & $N = N_{\mathrm{port}}/N_{\mathrm{comb}}$ & 符号 & 6.2.3.6 \\
+PAS RE 数 & 2（$k_0,k_1$）/ 无线帧 / 端口 \#0 & RE & 6.2.3.8 \\
+PMS $u$ & $3,\ldots,20$（每端口可配） & 标识 & 6.2.3.9.1 \\
+PMS 多载波 & 2/3/4/5/8/10/16 基础载波 & 载波 & 6.2.3.9.1 \\
+安全 PMS rand & 128 bit & bit & 6.2.3.9.2 \\
+安全感知 $N_t$ & $\geq 2$；时段 $P\geq N_t$ & 天线/时段 & 6.2.3.10.2 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%----------------------------------------------------------------------
+\section{时序关系与触发条件}
+%----------------------------------------------------------------------
+
+\begin{enumerate}[nosep]
+  \item \textbf{FTS/STS}：随 SAB/RAB 周期出现；FTS 占连续 2 符号、STS 占 1 符号；
+  \item \textbf{G-DMRS-C/P-DMRS-C}：每 TTI 固定符号（\#6 或 \#0），与 G-PCIB/P-PCIB 盲检并行；
+  \item \textbf{SRS/CSI-RS}：预配置调度激活去激活触发；CSI-RS 起始符号依赖 SAB/G-PCIB/STS 布局；
+  \item \textbf{DMRS-D}：随数据 DSCI/预配置映射；按 \texttt{DMRS-TimeGranularity} 周期重复；
+  \item \textbf{T-DMRS-C}：随 TCI 发送，首符号固定；
+  \item \textbf{PAS}：随数据调度，每被调度无线帧首符号（除 DMRS-D 所在帧）；
+  \item \textbf{PMS}：6.2.4.6.6/6.7 位置测量资源指示触发；G 可发 PMS/CSI-RS，T 可发 PMS/SRS；
+  \item \textbf{安全 PMS}：G 配置 rand/counter；每位置测量符号 $\mathrm{COUNTER}_r$ 递增；
+  \item \textbf{感知参考}：6.2.4.6.6 感知资源指示触发；G 用 CSI-RS/PMS，T 用 SRS/PMS；
+  \item \textbf{安全感知}：每过程 $S$ 个事件、间隔 $T$；置乱数须表 6 方式一或二同步。
+\end{enumerate}
+
+%----------------------------------------------------------------------
+\section{处理步骤}
+%----------------------------------------------------------------------
+
+\subsection{发送侧（通用参考信号）}
+
+\textbf{Step 1}：确定信号类型、链路符号（G/T/D）、$(k,l)$ 资源集合。
+
+\textbf{Step 2}：若使用 $r_{n,l}(k)$，按 6.5.3 以无线帧号 $n$、符号号 $l$ 生成 QPSK 序列。
+
+\textbf{Step 3}：若为 FTS/STS/PMS，按子节公式计算 ZC 序列并施加功率缩放（STS 乘 $2\sqrt{2}$）。
+
+\textbf{Step 4}：写入 $a_{k,l}^{(p)}$，校验 $k{\neq}80$；多端口仅 $p_0$ 非零。
+
+\textbf{Step 5}：按 6.5.4 设置参考信号与绑定控制/数据的功率关系。
+
+\subsection{接收侧（同步与信道估计）}
+
+\textbf{Step 1}：盲检 STS/FTS 相关峰，完成粗/精同步（6.2.7）。
+
+\textbf{Step 2}：按信号类型定位 RE（固定 \#6/\#0 或调度指示）。
+
+\textbf{Step 3}：本地再生 $r_{n,l}(k)$ 或 ZC 序列，与接收 RE 相关得 $H(k,l)$。
+
+\textbf{Step 4}：将信道估计送入 6.2.4/6.2.5 控制/数据解调或 6.6/6.7 测量处理。
+
+\subsection{位置测量信号发送（6.2.3.9）}
+
+\textbf{Step 1}：解析 6.2.4.6.6/6.7 资源指示，确定符号/端口/带宽。
+
+\textbf{Step 2}：专用 PMS：按 $u$ 生成 $d(n)$ 映射 RE；或选用 CSI-RS/SRS 并按 6.2.3.2/3 规则生成 $r_{n,l}(k)$。
+
+\textbf{Step 3}：安全模式一：KDF 加扰 $c(i)$ $\rightarrow$ $D(j)$ $\rightarrow$ QPSK；安全模式二：单载波 IFFT 得 $a$，按表 5 拼接并加 CP。
+
+\subsection{感知测量信号发送（6.2.3.10）}
+
+\textbf{Step 1}：解析感知资源指示，选择 CSI-RS/SRS/PMS 作为感知参考。
+
+\textbf{Step 2}：安全感知：配置 $N_t\geq 2$ 天线；按事件分 $P$ 时段生成 $X(k,n)$ 矩阵；同步置乱数（表 6）。
+
+%----------------------------------------------------------------------
+\section{约束与实现要点}
+%----------------------------------------------------------------------
+
+\begin{enumerate}[nosep]
+  \item \textbf{DC 子载波}：所有信号须满足 $a_{80,l}\equiv 0$；
+  \item \textbf{FTS 双符号}：首符号 CP 加倍、次符号无 CP，不可简化为单符号；
+  \item \textbf{STS 梳齿}：仅 $k \bmod 8 = 0$ 且 $k{\neq}80$ 有效；
+  \item \textbf{G-DMRS-C 载波}：无 SAB 的基础载波不映射 G-DMRS-C；
+  \item \textbf{DMRS 跨载波}：含/不含 SAB 联合调度时，时域起点以含 SAB 载波为准；
+  \item \textbf{DMRS 端口}：$N_{\mathrm{comb}}$ 与 $N_{\mathrm{port}}$ 须整除；梳齿时奇偶端口分频；
+  \item \textbf{T-DMRS-C 绑定}：频域资源须与 TCI 完全相同；
+  \item \textbf{PAS 端口}：仅 \#0 天线端口映射 $k_0,k_1$；
+  \item \textbf{安全 PMS}：KDF counter 序列长度须与基础载波数严格匹配；
+  \item \textbf{安全感知}：$N_t \geq 2$；置乱数须 G/T 同步（表 6 方式一或二）。
+\end{enumerate}
+
+%----------------------------------------------------------------------
+\section{与标准其他章节的衔接}
+%----------------------------------------------------------------------
+
+\begin{itemize}[nosep]
+  \item \textbf{6.2.1}：8 类逻辑信号索引；6.2.3 为波形级定义（含 P-DMRS-C、感知扩展）；
+  \item \textbf{6.2.2}：RE 网格、符号类型与 CP，是映射坐标系；
+  \item \textbf{6.2.4.2/6.2.4.5}：SAB/RAB 内 FTS/STS 符号 \# 与 $u$ 取值；
+  \item \textbf{6.2.4.6.2/6.6/6.7}：SRS/CSI-RS/PMS/感知资源指示触发；
+  \item \textbf{6.2.5}：DMRS-D/PAS 与数据 TB 绑定；
+  \item \textbf{6.5.2/6.5.3/6.5.4}：序列生成与功率；
+  \item \textbf{6.6/6.7}：位置/感知测量流程；
+  \item \textbf{8.3}：多基础载波 PMS 中心频率。
+\end{itemize}
+
+\vfill
+\begin{center}
+\small\textcolor{gray}{字段级定义与完整公式以 T/XS 10001-2025 第 6.2.3 节及 6.5.x 为准；本文档提供物理层信号序列、映射与功率的工程解读，供 SLB 120\,kHz 实现与联调参考。}
+\end{center}
+
+\end{document}
