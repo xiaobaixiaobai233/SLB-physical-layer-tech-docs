@@ -1,0 +1,1001 @@
+% !TEX program = xelatex
+\documentclass[11pt,a4paper]{ctexart}
+
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning}
+
+\geometry{left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm}
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue}
+
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+
+\title{%
+  \textbf{星闪 SLB 物理层}\\[0.4em]
+  \Large 6.6.2 距离位置信息测量（快速定位）技术文档\\[0.3em]
+  \large RTT \textbullet\ FLAG \textbullet\ 跳频复合 \textbullet\ 端到端流水线
+}
+\author{依据 T/XS 10001-2025《星闪无线通信系统 接入层\\
+同步低时延宽带空口 SLB 技术要求和测试方法》整理\\
+（团体标准 20250326 版）\\[0.3em]
+整合归档：从配置到解算的工程实现与联调}
+\date{2026 年 7 月 19 日}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+%======================================================================
+\part{总览}
+%======================================================================
+
+\section{文档范围与模块划分}
+
+本文档对应 T/XS 10001-2025 \textbf{6.6.2 距离位置信息测量}（含快速定位 FLAG）的工程解读：从配置、激活、空口测量到报告与距离/位置输出。覆盖方式一 RTT、方式二 FLAG（M2M/DL/SUL/AUL）及方式三跳频复合；6.6.1 角色/XRC 作为前置输入；角度（6.6.3）与坐标融合（6.6.4）仅作下游接口。
+
+\begin{table}[h]
+\centering
+\small
+\caption{子节划分}
+\begin{tabular}{lll}
+\toprule
+\textbf{子节号} & \textbf{子节主题} & \textbf{核心输出/行为} \\
+\midrule
+6.6.2.1 & 基于 RTT 的测距 & 两/三信号交互；$T_a$--$T_d$；距离 $D$ \\
+6.6.2.2 & 测量组快速定位 FLAG & 建组/参数/GCI-4；M2M/DL/SUL/AUL \\
+6.6.2.2.1 & 测量组建立 & 组 ID、PhyID 顺序、被测节点位图 \\
+6.6.2.2.2 & M2M-FLAG & 三轮 PMS；时间差报告；多对多 RTT \\
+6.6.2.2.3 & DL-FLAG & 锚点互测；组播报告；DL-TDOA \\
+6.6.2.2.4 & SUL-FLAG & 两次 GCI-4；锚点同步 + 标签上行 TDOA \\
+6.6.2.2.5 & AUL-FLAG & 单次 GCI-4；仅标签上行 TDOA \\
+6.6.2.3 & 双向复合信道测距 & 跳频 CSI；双向复合；等效大带宽距离 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+实现映射（联调用）：M0 角色/PhyID；M1 第 7 章信令；M2 GCI/TCI；M3 PMS 与 TOD/TOA；M4 流程编排；M5 距离/TDOA/CSI 解算；M6$\rightarrow$6.6.4；M7 跳频 CSI 反馈。
+
+\section{与相关章节的关系}
+
+上游提供波形、控制指示与测量量；本模块编排谁发谁收与如何解距离；下游消费距离/TOA/CSI 做角度增强与坐标融合。
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{相关节号} & \textbf{关系} & \textbf{说明} \\
+\midrule
+6.2.3.9 & 上游 & PMS / 安全 PMS 波形生成 \\
+6.2.4.6.6/6.7 & 上游 & GCI 格式 0--3、TCI 比特域 \\
+6.5.5.6--6.5.5.8 & 上游 & CSI、TOA/TOD、AoA 测量量 \\
+6.6.1 & 同章前置 & 角色、XRC 静态资源、汇聚规则 \\
+第 7.1/7.5 章 & 上游（高层） & XRC ASN.1（UNALIGNED PER） \\
+6.6.3 / 6.6.4 & 下游 & 角度、坐标融合 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{端到端流水线总览}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  box/.style={draw,rounded corners,align=center,font=\small,minimum height=0.85cm,minimum width=2.1cm},
+  arr/.style={-{Stealth[length=2mm]},thick}
+]
+  \node[box,fill=gray!12] (m1) {M1 高层\\配置};
+  \node[box,right=0.55cm of m1,fill=blue!8] (m2) {M2 GCI/TCI\\激活/调度};
+  \node[box,right=0.55cm of m2,fill=orange!12] (m3) {M3 PMS\\TOA/TOD};
+  \node[box,right=0.55cm of m3,fill=green!10] (m4) {M4 流程\\编排};
+  \node[box,right=0.55cm of m4,fill=yellow!15] (m5) {M5 距离\\TDOA};
+  \node[box,right=0.55cm of m5] (m6) {M6 坐标};
+  \draw[arr] (m1) -- (m2);
+  \draw[arr] (m2) -- (m4);
+  \draw[arr] (m4) -- (m3);
+  \draw[arr] (m3) -- (m4);
+  \draw[arr] (m4) -- (m5);
+  \draw[arr] (m5) -- (m6);
+\end{tikzpicture}
+\caption{定位功能数据流（M4 编排驱动 M3，M5/M6 消费测量结果）}
+\end{figure}
+
+\textbf{分层原则}：XRC / 测量组消息在\textbf{数据链路层}组包；GCI/TCI 在\textbf{物理层控制}比特域；PMS 与 TOA/TOD 在\textbf{物理层测量}；距离公式与 FLAG 时序在\textbf{6.6.2 流程模块}；坐标在\textbf{6.6.4}。
+
+\newpage
+%======================================================================
+\part{6.6.2 距离位置信息测量（快速定位）}
+%======================================================================
+
+\section{协议章节对应}
+
+本节对应 T/XS 10001-2025 第 6 章第 6.6.2 节「距离位置信息测量」，涵盖 6.6.2.1（RTT）、6.6.2.2（FLAG，含 6.6.2.2.1--6.6.2.2.5）、6.6.2.3（双向复合信道/跳频）。前置 6.6.1；实现依赖 6.2.3.9、6.2.4.6.6/6.7、6.5.5.6--6.5.5.8、第 7.5 章。
+
+\section{功能定义}
+
+\begin{enumerate}[nosep]
+  \item 接收高层配置与 PHY 控制指示，建立锚点/标签/测量组上下文；
+  \item 按选定模式编排 PMS 发收顺序与时序约束校验；
+  \item 采集或接收 TOD/TOA（及可选 CSI），组装时间差/TOA 报告；
+  \item 计算点对点或组内距离，或形成 TDOA 输入集合；
+  \item 将距离/TOA 交付坐标融合或上报解算节点。
+\end{enumerate}
+
+\section{模块边界（上下游及职责划分）}
+
+\subsection{上游模块}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{3.8cm}L{4.2cm}L{5cm}}
+\toprule
+\textbf{上游} & \textbf{输入} & \textbf{来源节号} \\
+\midrule
+XRC / 测量组消息解析 & 角色、组播、模式、PMS 参数 & 第 7.5 章、6.6.1/6.6.2.2.1 \\
+GCI/TCI 解析 & 资源指示、组激活、报告调度 & 6.2.4.6.6 / 6.2.4.6.7 \\
+PMS 生成与收发 & 测量符号波形 & 6.2.3.9 \\
+时间差/CSI 测量 & $t_1$--$t_6$、$T_a$--$T_d$、CSI & 6.5.5.6 / 6.5.5.7 \\
+能力反馈 & OFDM 测量/定位能力位 & 接入层能力消息 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{下游模块}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{3.8cm}L{4.2cm}L{5cm}}
+\toprule
+\textbf{下游} & \textbf{输出} & \textbf{说明} \\
+\midrule
+6.6.4 坐标解算 & $D$、TOA 集合、距离矩阵 & 多锚点融合 \\
+MAC 测量报告发送 & 时间差/TOA 报告 PDU & 按 PhyID / measReportDirection \\
+G 调度器 & 组 ACTIVE/IDLE 状态 & 驱动下一次 GCI-4 \\
+空口 TX/RX & PMS 发收触发 & 按 M4 时序回调 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{本模块不负责的内容}
+
+\begin{itemize}[nosep]
+  \item PMS 序列生成算法细节 $\rightarrow$ 6.2.3.9；
+  \item GCI/TCI 信道编码与映射 $\rightarrow$ 6.2.4.6.8 及后续；
+  \item XRC ASN.1 语法定义 $\rightarrow$ 第 7.5 章（本模块消费解析结果）；
+  \item AoA 物理估计算法 $\rightarrow$ 6.5.5.8 / 6.6.3；
+  \item 最终坐标几何融合公式全集 $\rightarrow$ 6.6.4。
+\end{itemize}
+
+\section{在 SLB 通信流程中的角色}
+
+\begin{enumerate}[nosep]
+  \item 接入与 XRC 建立/重配完成后，进入定位配置；
+  \item G 下发测量组建立与参数（FLAG）或 RTT 资源，或跳频位置测量信号配置；
+  \item SAB 同步后，GCI 第一至第三格式指示资源，或第四格式激活测量组；跳频路径在初始信道配置后直接按图案测量；
+  \item 组员按模式发收 PMS/测距帧，本地产生 TOD/TOA 或 CSI；
+  \item 按报告方向或 CSI 反馈上报；解算节点算距离或 TDOA，再交 6.6.4。
+\end{enumerate}
+
+%======================================================================
+\section{关键参数与强制要求}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{3.2cm}L{4.5cm}L{5cm}}
+\toprule
+\textbf{参数/要求} & \textbf{取值/约束} & \textbf{标准指针} \\
+\midrule
+OFDM 定位能力 & 支持则 RTT 必选 & 6.6.2 首段 \\
+FLAG / 跳频 & 可选 & 6.6.2 \\
+GCI 格式指示 & 0/1/2 资源；3=第四格式激活 & 6.2.4.6.6 \\
+FLAG PMS 符号数 & $\ge 2$ 测量符号 & 6.6.2.2.2 \\
+M2M 轮次间隔 & 相邻阶段 $\ge 1$ 空闲符号 & 6.6.2.2.2 \\
+PMS $u$ & 与 G 同步块 $u$ 不同 & 6.6.2.2.2 \\
+DL 锚点间隔 & $\ge 1$ 符号 & 6.6.2.2.3 \\
+SUL 标签间隔 & $\ge 0$ 符号 & 6.6.2.2.4 \\
+跳频 $T_{\mathrm{RF}}$ & $\max(T_{\mathrm{RF},1},T_{\mathrm{RF},2})$，切换前须等待 & 6.6.2.3.2 g) \\
+跳频前导版本域 & 初始信道 \texttt{00}；跳频信道 \texttt{01} & 6.6.2.3.3 \\
+CSI 全反馈 & 每基础载波 160 有效子载波各 1 IQ；DC 不反馈 & 6.6.2.3.3 \\
+CSI 部分反馈 & 分组参数 $P\in\{2,4,8\}$，协商阶段指示 & 6.6.2.3.3 \\
+XRC 编码 & UNALIGNED PER，小端，8 bit 对齐 & 7.1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{处理步骤} 
+
+\subsection{公共启动：所有定位方式共用的前置步骤}
+%======================================================================
+
+下列步骤在实现任一定位方式前必须完成。每步给出\textbf{需要的东西}与\textbf{从哪来}。
+
+\subsection{Step 0 节点能力与角色就绪}
+
+\textbf{步骤作用}：在配置资源、建测量组、发 PMS 之前完成``体检与身份确认''。标准要求支持 OFDM 测量/定位的 T 节点必选 RTT（6.6.2）；能力或 PhyID 未就绪则不得进入后续 FLAG/RTT 配置校验。本步\textbf{不}发测距信号。
+
+\begin{enumerate}
+  \item \textbf{需要}：T 节点 OFDM 测量/定位能力指示；本节点 PhyID；可选预置锚点坐标。
+  \item \textbf{从哪来}：能力查询/反馈消息（第 7 章定位能力相关 IE）；PhyID 由接入/XRC 配置（7.2 / 7.5）；锚点绝对/相对坐标由 6.6.1 XRC 写入。
+  \item \textbf{输出}：能力标志、本地角色候选表，供后续配置校验（例如无定位能力则拒配 RTT/FLAG）。
+  \item \textbf{实现检查}：能力位为假时阻断 RTT 会话创建PhyID 无效时阻断 FLAG 建组解析。
+\end{enumerate}
+
+\subsection{Step 1 扩展无线资源配置（XRC）}
+
+\begin{enumerate}
+  \item \textbf{需要}：XRCSetup 或 XRCReconfiguration PDU；字段至少覆盖角色相关、载波/带宽/序列类静态参数；FLAG 时含 \texttt{groupcastConfig} 或 \texttt{nonConnectMeasConfig}。
+  \item \textbf{从哪来}：G 节点高层按第 7.5 章 ASN.1 组包，经空口调度发送；物理层\textbf{不组} XRC，只接收高层下发的解析结果。
+  \item \textbf{本步动作}：解析 $\rightarrow$ 写入配置库（PIB/上下文）$\rightarrow$ 节点进入待命。
+  \item \textbf{输出}：\texttt{slb\_pos\_xrc\_cfg}（角色、静态资源、组播地址、可选测量项与上报目标）。
+\end{enumerate}
+
+\subsection{Step 2 同步基准}
+
+\textbf{步骤作用}：使测量组内全部锚点与标签对齐到同一时间（及频率）基准。未同步时，TOA/TOD 不可比，FLAG 按 PhyID 轮流发会失拍，TDOA 失效，RTT 在频偏下精度下降。本步只做对表，不测距离。
+
+\textbf{标准位置}（分层）：
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{层次} & \textbf{节号} & \textbf{内容} \\
+\midrule
+同步波形 & 6.2.3.1 & 同步信号 FTS / STS（含序列参数 $u$） \\
+同步信息比特 & 6.2.4.1 & 同步信息字段 \\
+同步块结构 & 6.2.4.2 & 同步信息块 SAB 组成与发送 \\
+FLAG 使用要求 & 6.6.2.2 & 测量前对全部测量组成员同步；发完 SAB 后再 GCI 激活 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{怎么做（FLAG）}：
+\begin{enumerate}
+  \item \textbf{需要}：SAB（同步块）及同步块参数 $u$。
+  \item G 节点物理层在 TTI 内发送 SAB（含 FTS/STS 与同步信息）。
+  \item 组内锚点/标签接收 SAB，按 6.2 同步流程完成定时（及频偏）对齐。
+  \item G \textbf{发送完同步块之后}，再发送 GCI 第四格式激活测量组（见 Step 3 / F3）。
+  \item \textbf{输出}：组内时间对齐状态 \texttt{SYNCED}。
+\end{enumerate}
+
+\textbf{补充}：时间差报告类型 2（锚点$\to$标签）时，各锚点上报前还须先发 SAB（$u$ 由 G 配置）；第一个锚点另发 TCI。该 SAB 属报告阶段再同步，不能替代本步的组测量前同步。
+
+\textbf{与 PMS 隔离}：FLAG 要求专用 PMS 的 $u$ 与 G 同步块 $u$ 不同（6.6.2.2.2），配置校验须强制执行。
+
+\subsection{Step 3 动态资源或测量组激活}
+
+\begin{enumerate}
+  \item \textbf{需要（RTT 点对点）}：GCI 第一至第三格式（时频/端口/波束），\textbf{或} XRC 中已写死的时频资源。
+  \item \textbf{需要（FLAG）}：测量组建立消息 + 测量组参数配置消息 + GCI \textbf{第四格式}（格式指示值 $=3$）。
+  \item \textbf{需要（跳频）}：定位能力交互 + \textbf{位置测量信号配置消息}（6.6.2.3.2）；第一/第二测量信号时频由 GCI 或 XRC 指示。\textbf{不}走测量组建立，\textbf{不}依赖 GCI 第四格式。
+  \item \textbf{从哪来}：GCI/TCI 比特域见 6.2.4.6.6/6.7；测量组消息流程见 6.6.2.2.1，消息类型在第 7 章 G 链路专用控制中定义；第四格式携带测量组 ID、激活/去激活、时间差报告调度（第 10--11 bit）；跳频配置在初始工作信道下发。
+  \item \textbf{输出}：当次资源描述，或组状态 \texttt{ACTIVE}；跳频侧为 \texttt{HOP\_CONFIGURED} 与跳频图案上下文。
+\end{enumerate}
+
+\subsubsection{GCI 第四格式激活的作用}
+
+GCI 位置测量资源指示共四种格式（6.2.4.6.6）：格式指示 0/1/2 用于配当次两/三信号时频资源；\textbf{格式指示值为 3 的第四格式}不配符号细节，专用于测量组\textbf{激活/去激活}。
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{3cm}L{10cm}}
+\toprule
+\textbf{作用} & \textbf{说明} \\
+\midrule
+开测 / 关测 & 激活位 $=1$：本组按已配模式开始发收 PMS；激活位 $=0$：去激活停测 \\
+指定目标组 & 携带测量组 ID，仅匹配组成员响应 \\
+调度时间差报告（可选） & 第 10--11 bit：$0$ 不调度报告；$1$ 锚点与标签向 G 报；$2$ 锚点向标签报 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+与前置步骤的分工：XRC / 建组 / 参数配置完成``配齐待命''；SAB 完成``对表''；\textbf{GCI 第四格式}完成``按下开始/停止键''。未收到激活前，成员不得按 FLAG 流程发送组内测距 PMS。收到激活后，在之后 1 个或多个 TTI 内按 PhyID 顺序进入测量。
+
+\noindent\textbf{实现要点：}建组/XRC 完成不等于开测；FLAG 开测扳机是 GCI 第四格式。
+
+%======================================================================
+\subsection{方式一：RTT 端到端（6.6.2.1）}
+%======================================================================
+
+\subsection{适用条件}
+
+支持 OFDM 测量/定位的 T 节点必选。场景：单锚点--单标签点对点距离。
+
+\subsection{Step R1 配置时频与信号模式}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{3cm}L{5.5cm}L{4.5cm}}
+\toprule
+\textbf{需要} & \textbf{含义} & \textbf{从哪来} \\
+\midrule
+第一/第二节点角色 & 谁先发第一 PMS & XRC / 本地角色配置（6.6.1） \\
+两信号或三信号 & 是否采 $T_c,T_d$ & 测量配置 / GCI 格式选择 \\
+时频资源 & 各信号起始符号、端口、波束 & GCI 格式 0--2（6.2.4.6.6）或 XRC 位置测量信号配置 \\
+安全 PMS 开关 & 是否用安全序列 & XRC；生成 6.2.3.9.2 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Step R2 双向 PMS 交互}
+
+\begin{enumerate}
+  \item 第一节点发第一 PMS，记 TOD $\rightarrow t_1$；第二节点记 TOA $\rightarrow t_2$。
+  \item 第二节点发第二 PMS，记 TOD $\rightarrow t_3$；第一节点记 TOA $\rightarrow t_4$。
+  \item 三信号时：第一节点再发第三 PMS（$t_5$），第二节点记 $t_6$。
+  \item \textbf{时间戳从哪来}：6.5.5.7，相对本地参考时间；起点为第一个测量符号开端。
+  \item \textbf{波形从哪来}：6.2.3.9 PMS 生成，由 M3 在指示符号上发射/相关接收。
+\end{enumerate}
+
+\subsection{Step R3 本地时间差与上报}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{2.2cm}L{4cm}L{6.5cm}}
+\toprule
+\textbf{量} & \textbf{计算} & \textbf{谁上报} \\
+\midrule
+$T_a$ & $t_4-t_1$ & 第一设备 $\rightarrow$ 解算节点 \\
+$T_b$ & $t_3-t_2$ & 第二设备 $\rightarrow$ 解算节点 \\
+$T_c,T_d$ & 三信号定义见 6.6.2.1 / 图 11 & 第一报 $T_a,T_c$；第二报 $T_b,T_d$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+报告消息封装属 MAC/高层（第 7 章测量报告类消息）；PHY/流程模块提供测量 IE。
+
+\subsection{Step R4 距离解算}
+
+两信号：
+\[
+D=\frac{T_a-T_b}{2}\,C
+\]
+三信号：
+\[
+D=\frac{T_a T_d-T_b T_c}{T_a+T_d+T_b+T_c}\,C
+\]
+$C$ 为光速。输出交 6.6.4 或本地应用。
+
+\subsection{RTT 数据流一览}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{步骤} & \textbf{输入} & \textbf{来源} & \textbf{输出} \\
+\midrule
+R1 & 角色+资源 & XRC/GCI1--3 & 会话上下文 \\
+R2 & PMS 符号时机 & M3+调度 & $t_1$--$t_6$ \\
+R3 & 本地时刻 & 6.5.5.7 & $T_a$--$T_d$ 报告 \\
+R4 & $T_a$--$T_d$ & 报告汇聚 & $D$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\subsection{方式二公共：FLAG 建组到激活}
+%======================================================================
+
+FLAG 四种方法共用本节；差异仅在激活后的发信模式。三步分工：
+\begin{itemize}[nosep]
+  \item F1 建组：组员名单、PhyID 顺序、锚点/标签身份 $\rightarrow$ \texttt{CONFIGURED}；
+  \item F2 参数：测量模式（M2M/DL/SUL/AUL）、信号形态、报告方向等，仍待命；
+  \item F3 SAB + GCI-4：对表并按下开测键 $\rightarrow$ \texttt{SYNCED} $\rightarrow$ \texttt{ACTIVE}。
+\end{itemize}
+F1/F2 完成不等于开始测距；开测扳机为 F3 中的 GCI 第四格式。
+
+\subsection{Step F1 测量组建立}
+
+\textbf{步骤作用}：建立测量组身份与成员关系表，使后续激活与空口排队有唯一依据。
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{3.2cm}L{5.2cm}L{4.5cm}}
+\toprule
+\textbf{需要} & \textbf{用途} & \textbf{从哪来} \\
+\midrule
+测量组 ID & 激活与报告匹配 & 测量组建立消息（6.6.2.2.1） \\
+成员 PhyID 顺序 & 发 PMS 顺序与报告顺序 & 同上 \\
+被测节点位图 & 锚点/标签身份 & 同上 \\
+组播地址 & 组播收发建组/参数 & XRC \texttt{groupcastConfig} 或 Setup 中 \texttt{nonConnectMeasConfig}（第 7.5 章） \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+字段工程含义：
+\begin{itemize}[nosep]
+  \item 测量组 ID：GCI-4 激活携带该 ID，仅目标组成员响应；
+  \item PhyID 顺序：同时约束发信顺序与上报顺序，实现不得重排；
+  \item 被测节点位图：区分谁发第一/第三信号（锚点）与谁发第二/上行信号（标签）；
+  \item 组播地址：已连接标签由 XRC 重配 \texttt{groupcastConfig}；无连接标签经接入目的字段请求后，由 xrcSetup 的 \texttt{nonConnectMeasConfig} 下发组播 PhyID 与后续 GCI 资源指示。
+\end{itemize}
+
+\textbf{输出}：组上下文 \texttt{CONFIGURED}（尚未发 PMS）。
+
+\subsection{Step F2 测量组参数配置}
+
+\textbf{步骤作用}：在 F1 名单之上选定 FLAG 方法与信号/报告参数。同一测量组可通过测量模式字段切换 M2M/DL/SUL/AUL。
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{3.2cm}L{5.2cm}L{4.5cm}}
+\toprule
+\textbf{需要} & \textbf{用途} & \textbf{从哪来} \\
+\midrule
+测量模式 & M2M/DL/SUL/AUL & 测量组参数配置消息 \\
+测量信号模式 & 两信号/三信号/循环三信号 & 同上 \\
+PMS 类型/带宽/$u$ & 生成与隔离同步块 & 同上；生成走 6.2.3.9 \\
+measReportDirection & 报告向 G 或向标签 & 同上 \\
+间隔符号数等 & 模式专用约束 & 同上 + 6.6.2.2.x \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+字段工程含义：
+\begin{itemize}[nosep]
+  \item 测量模式：决定激活后谁发 PMS、采用 RTT 还是 TDOA（方法分叉点）；
+  \item 测量信号模式：两信号低复杂度；三信号抑频偏；循环三信号用于 DL 锚点两两测全；
+  \item PMS 的 $u$：必须与 G 同步块 $u$ 不同；
+  \item measReportDirection：对应标准图 12 时间差反馈类型 1（$\to$G）或类型 2（锚点$\to$标签）。
+\end{itemize}
+
+\textbf{输出}：参数写入组上下文，成员保持待命，等待 F3。
+
+\subsection{Step F3 SAB + GCI 第四格式激活}
+
+\textbf{步骤作用}：完成组同步并激活（或去激活）测量；可选同时调度时间差报告方向。
+
+\begin{enumerate}
+  \item G 发 SAB，组状态 $\rightarrow$ \texttt{SYNCED}（作用与标准指针见 Step 2）。
+  \item G 发 GCI 第四格式：测量组 ID + 激活位 $=1$；可选配置第 10--11 bit 调度时间差报告（0 不调度 / 1 向 G / 2 锚点向标签）。第四格式作用见 Step 3 小节。
+  \item \textbf{从哪来}：6.2.4.6.6 第四格式比特布局；CRC 掩码使用测量组组播地址（高层配置）。
+  \item 成员在激活后 1 个或多个 TTI 内进入模式特定测量（M2M/DL/SUL/AUL 各节）。
+  \item DL-FLAG 场景下，若测量周期字段为 0：仅激活\textbf{一次}双向测量及对应报告（6.6.2.2.3），非周期反复测量。
+\end{enumerate}
+
+\subsection{FLAG 公共状态机}
+
+\texttt{UNCONFIGURED} $\rightarrow$ \texttt{CONFIGURED}（F1/F2）$\rightarrow$ \texttt{SYNCED}（SAB）$\rightarrow$ \texttt{ACTIVE}（GCI-4）$\rightarrow$ \texttt{MEASURING} $\rightarrow$ \texttt{REPORTING} $\rightarrow$ \texttt{IDLE}。
+
+F1--F3 与后续方法的关系：四种 FLAG 均须走完 F1--F3；F2 测量模式决定激活后进入哪条方法流水线；F3 之后才执行各方法空口步骤。
+
+%======================================================================
+\subsection{方法 1：M2M-FLAG 端到端（6.6.2.2.2）}
+%======================================================================
+
+\subsection{Step M1 校验配置}
+
+校验：$\ge 1$ 锚点且 $\ge 1$ 标签；PMS $\ge 2$ 符号；$u\neq$ 同步块 $u$；轮次间隔配置 $\ge 1$ 空闲符号。失败则拒配，不进入 ACTIVE 测量。
+
+\subsection{Step M2 三轮顺序 PMS（对应标准图 12 步骤 3）}
+
+\begin{enumerate}
+  \item 锚点按 PhyID 依次发\textbf{第一}位置测量信号；其余节点 RX 并记 TOA；发送锚点记 TOD。
+  \item $\ge 1$ 空闲符号后，标签按 PhyID 依次发\textbf{第二}信号。
+  \item $\ge 1$ 空闲符号后，锚点按 PhyID 依次发\textbf{第三}信号。
+  \item \textbf{需要}：符号级调度节拍、本节点在顺序表中的索引、TX/RX 权限。
+  \item \textbf{从哪来}：顺序来自测量组建立消息；节拍来自帧/TTI 定时（6.2.2）与 GCI 激活时机；波形来自 6.2.3.9；时间戳来自 6.5.5.7。
+\end{enumerate}
+
+\subsection{Step M3 时间差反馈（图 12 步骤 4）}
+
+M2 三轮 PMS 结束后，各节点已在本地持有 TOD/TOA（或由此算出的时间差）。Step M3 决定\textbf{把这些量送到哪里解算}：集中到 G，还是锚点直接组播给标签。标准图 12 的两种反馈类型由 \texttt{measReportDirection} 与 GCI 第四格式第 10--11 bit 共同决定（0 不调度报告 / 1 类型 1 / 2 类型 2）。
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{2cm}L{5cm}L{5.5cm}}
+\toprule
+\textbf{类型} & \textbf{行为} & \textbf{从哪来} \\
+\midrule
+类型 1 & 锚点与标签向 G 顺序上报 & measReportDirection；GCI-4 第 10--11 bit$=1$ \\
+类型 2 & 锚点向标签组播时间差 & 同上 bit$=2$；各锚点先 SAB；第一个锚点发 TCI（6.2.4.6.7）分配报告资源；发报告前插 DMRS \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{类型 1 与类型 2 的差别}
+
+\begin{table}[h]
+\centering
+\small
+\caption{M2M 时间差反馈类型对照}
+\begin{tabular}{L{2.4cm}L{5.5cm}L{5.5cm}}
+\toprule
+\textbf{对比项} & \textbf{类型 1（向 G）} & \textbf{类型 2（锚点$\to$标签）} \\
+\midrule
+报告方向 & 锚点 + 标签 $\rightarrow$ \textbf{G} & 仅锚点 $\rightarrow$ \textbf{标签组播} \\
+谁上报 & 各锚点与各标签都发报告 & 标签一般不上报时间差；锚点发 \\
+解算落点 & \textbf{G / 指定解算节点}集中解算 & \textbf{标签侧}可本地解算（或再上报） \\
+空口路径 & T 链路顺序发往 G & T 节点\textbf{直传链路}组播 \\
+同步/资源开销 & 相对轻：按 PhyID 顺序向 G 报 & 更重：每锚点先 SAB；$u$ 由 G 配；第一锚点另发 TCI；发报告前插 DMRS \\
+资源谁配 & G 可用测量报告请求调度各成员上报时隙 & 建组参数中 \texttt{measReportResourceOffset/Duration} 给出整段时域；第一锚点 TCI 再切分后续锚点资源 \\
+典型目的 & 中心化定位、G 汇聚多成员结果 & 标签本地定位、降低经 G 回传时延/负荷 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{类型 1（集中上报）实现要点}：
+\begin{enumerate}[nosep]
+  \item GCI-4 第 10--11 bit $=1$，且 \texttt{measReportDirection} 配为锚点与标签向 G 报。
+  \item 各锚点、各标签按测量组 PhyID 顺序，经 T 链路向 G 发送测量时间差报告。
+  \item G 可再发测量报告请求，触发组成员上报；G（或解算节点）汇齐后按 6.6.2.1 算 $\{D_{ij}\}$。
+\end{enumerate}
+
+\textbf{类型 2（锚点组播给标签）实现要点}：
+\begin{enumerate}[nosep]
+  \item GCI-4 第 10--11 bit $=2$，\texttt{measReportDirection} 配为锚点向标签发。
+  \item \textbf{每个}锚点先发 SAB（报告阶段再同步；同步块 $u$ 由 G 配置，与测距 PMS 的 $u$ 隔离要求仍适用）。
+  \item \textbf{第一个}锚点（建组 PhyID 列表中的首个锚点）额外发 TCI（6.2.4.6.7），指示后续各锚点发 SAB/DMRS/报告的资源长度，以及本锚点报告起止符号。
+  \item 其余锚点：发 SAB 后\textbf{不}再发 TCI，直接发测量时间差报告。
+  \item 所有锚点在直传链路上发报告前须插入 \textbf{DMRS}。
+  \item 整段报告时域由第一锚点侧的 \texttt{measReportResourceOffset}、\texttt{measReportResourceDuration} 界定；无连接标签场景下，G 还可再发 GCI-4 激活``锚点向标签按组播地址发时间差报告''。
+\end{enumerate}
+
+\textbf{选型}：要 G 统一出坐标、运维简单 $\rightarrow$ 类型 1；要标签端快速本地解、或标签与 G 弱连接 $\rightarrow$ 类型 2（实现复杂度更高）。两种类型\textbf{不改变} M2 的三轮 PMS 发收，只改变报告路由与解算位置。
+
+\subsection{Step M4 多对多距离}
+
+对每对（锚点 $i$，标签 $j$）用 6.6.2.1 公式得 $D_{ij}$，形成距离矩阵，交 6.6.4 解各标签位置。
+
+%======================================================================
+\subsection{方法 2：DL-FLAG 端到端（6.6.2.2.3）}
+%======================================================================
+
+\subsection{配置差异（相对 F1/F2）}
+
+\begin{itemize}[nosep]
+  \item 测量模式 $=$ DL-FLAG；成员类型\textbf{全部为锚点}；标签\textbf{不发} PMS。
+  \item 锚点间空闲符号 $\ge 1$。
+  \item 可选循环双向三信号；此时 \texttt{measReportDirection} 配为 5（标准要求）。
+\end{itemize}
+
+\subsection{Step D1 先发/后发锚点互测}
+
+\begin{enumerate}
+  \item 先发锚点（PhyID 列表首个）发第一信号；后发锚点依次发第二信号。
+  \item 三信号：先发锚点收完后再发第三信号。
+  \item 循环三信号：测量信号循环 1 + 循环 2，使每个锚点都能作先发完成两两三信号（图 13）。
+  \item TOA 在接收锚点侧按 6.5.5.7 产生。
+\end{enumerate}
+
+\subsection{Step D2 报告与 DL-TDOA}
+
+按 DL-FLAG 时间差报告字段与 measReportDirection 组播报告；解算侧用下行 TDOA 几何（结合锚点已知坐标，坐标来自 6.6.1 XRC）。标签不发送，仅接收同步/报告（若需要）。
+
+\subsubsection{锚点如何把时间差报告下发给标签}
+
+DL-FLAG 中「下发」指：锚点互测结束后，将本地时间差封装为\textbf{测量时间差报告消息}，按配置方向用\textbf{组播 PhyID} 发出；\textbf{不是}把时间差字段塞进 PMS 波形。
+
+\begin{enumerate}
+  \item \textbf{前置}：G 已发 SAB，同步全部锚点与待定位标签；GCI-4 激活双向测量及对应报告（周期 $=0$ 时仅一轮互测 + 对应一次报告）。
+  \item \textbf{D1 完成后}：锚点本地已持有 TOD/TOA 或由此得到的时间差；标签全程未发 PMS。
+  \item \textbf{谁发}：由测量组参数中的 \textbf{DL-FLAG 时间差报告}字段决定——先发锚点发送，或全部锚点发送。
+  \item \textbf{发给谁}：由 \texttt{measReportDirection}（DL-FLAG 时间差传输方向）决定，标准主要包括：
+  \begin{itemize}[nosep]
+    \item 先发锚点向\textbf{标签及后发锚点}组播报告；
+    \item 或后发锚点依次向\textbf{先发锚点}组播报告。
+  \end{itemize}
+  循环双向三信号时，\texttt{measReportDirection} 应配为 5，使各锚点能按先发/后发角色组播齐套 $T_a,T_c$ / $T_b,T_d$。
+  \item \textbf{怎么发}：报告消息为 \texttt{PositioningMeasureTimeDifferenceReport}（第 7 章）；标准要求采用\textbf{组播 PhyID} 发送。标签（及方向所含的其它锚点）监听该组播地址接收 PDU。报告时域/MCS 等由测量组参数约束；GCI-4 亦可用于激活「测量时间差报告的发送」。
+  \item \textbf{标签侧解算}：收齐报告后，结合锚点已知坐标（6.6.1 XRC）做 \textbf{DL-TDOA} 几何解算得自身位置。解算可在标签本地，或由配置的解算节点完成（视部署而定）。
+\end{enumerate}
+
+\begin{table}[h]
+\centering
+\small
+\caption{DL-FLAG 报告下发与 PMS 的分工}
+\begin{tabular}{L{2.8cm}L{5.5cm}L{5cm}}
+\toprule
+\textbf{阶段} & \textbf{空口形态} & \textbf{作用} \\
+\midrule
+D1 锚点互测 & PMS（仅锚点发） & 产 TOD/TOA、时间差 \\
+D2 报告下发 & 测量时间差报告 + 组播 PhyID & 把时间差送给标签/相关锚点 \\
+解算 & 无新测距波形 & 锚点坐标 + 时间差 $\rightarrow$ 标签位置 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent\textbf{实现要点：}标签在 D2 只收同步与报告；无组播 PhyID 或未配报告方向时，不得假定标签能完成 DL-TDOA。
+
+%======================================================================
+\subsection{方法 3：SUL-FLAG 端到端（6.6.2.2.4）}
+%======================================================================
+
+\subsection{配置差异}
+
+\begin{itemize}[nosep]
+  \item 测量模式 $=$ SUL-FLAG，并\textbf{使能 DL-FLAG 步骤}；
+  \item 成员含锚点与标签；
+  \item 锚点间隔 $\ge 1$；标签间隔 $\ge 0$；
+  \item 需\textbf{两次} GCI 第四格式触发。
+\end{itemize}
+
+\subsection{Step S1 锚点双向测量（复用 DL-FLAG）}
+
+第一次 GCI-4 激活锚点互测（两/三/循环三信号）。\textbf{需要}：与 B6 相同的锚点侧发收能力。\textbf{目的}：获取飞行时间并准备时频同步，而非最终标签定位（标签可选据报告做一次 DL 解算）。
+
+\subsection{Step S2 时间差组播与定时同步}
+
+\begin{enumerate}
+  \item 三信号：配置先发锚点发报告；循环三信号：全部锚点发报告。
+  \item 后发锚点根据接收时间差计算飞行时间，向先发锚点做定时同步。
+  \item \textbf{从哪来}：报告内容来自 Step S1 测量；同步算法实现属节点时钟控制，标准要求结果为锚点时频对齐。
+\end{enumerate}
+
+\subsection{Step S3 标签上行发 PMS}
+
+第二次 GCI-4 触发标签按 PhyID 顺序发上行测量信号。锚点只收，记各标签 TOA（6.5.5.7）。
+
+\subsection{Step S4 TOA 报告与 TDOA}
+
+锚点按序向解算节点发送各标签 TOA；解算节点执行 TDOA，输出标签位置（交 6.6.4）。
+
+%======================================================================
+\subsection{方法 4：AUL-FLAG 端到端（6.6.2.2.5）}
+%======================================================================
+
+\subsection{配置差异}
+
+测量模式 $=$ AUL-FLAG；\textbf{锚点不发}测量信号；仅配置标签顺序发送。假定锚点同步已由系统其它手段保证（无 S1/S2）。
+
+\subsection{Step A1 激活与上行}
+
+单次 GCI-4 激活后，标签按建立消息顺序发上行 PMS；锚点测 TOA。
+
+\subsection{Step A2 报告与 TDOA}
+
+同 SUL 的 Step S4。相对 SUL 减少锚点互测与同步两步。
+
+%======================================================================
+\subsection{FLAG 四种方法为何拆分及各自作用}
+%======================================================================
+
+FLAG 共用「建组 + 参数 + SAB + GCI-4」外壳，内部分成 M2M / DL / SUL / AUL，是为在现场约束下选型，而非四套互不相关的协议。典型约束包括：标签能否发射、锚点是否已时频对齐、是否需要多对多距离矩阵、空口能否承受多轮排队。
+
+\begin{table}[h]
+\centering
+\small
+\caption{四种 FLAG 方法作用与适用}
+\begin{tabular}{L{2cm}L{5.2cm}L{5.5cm}}
+\toprule
+\textbf{方法} & \textbf{作用} & \textbf{更适合} \\
+\midrule
+M2M & 锚点发 1/3、标签发 2，多锚点$\times$多标签\textbf{多对多 RTT}，得距离矩阵 $D_{ij}$ & 要绝对距离、精度优先；空口可承受三轮排队 \\
+DL & 仅锚点互测/发下行 PMS；标签\textbf{不发}；听下行 + 报告做\textbf{DL-TDOA} & 标签多、省终端发射；锚点坐标已知 \\
+SUL & 先 DL 式锚点互测完成\textbf{时频同步}，再标签上行；锚点报 TOA 做\textbf{上行 TDOA} & 要用上行 TDOA，但锚点初始未对齐（两次 GCI-4） \\
+AUL & 假定锚点\textbf{已同步}；本流程锚点不发 PMS；仅标签上行 $\rightarrow$ TOA $\rightarrow$ 上行 TDOA & 锚点已有有线/GNSS/事先校准；要轻量上行 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{选型顺序（实现决策）}：
+\begin{enumerate}[nosep]
+  \item 需要两两距离 / 距离矩阵 $\rightarrow$ \textbf{M2M}；
+  \item 否则若标签不能或不愿发 PMS $\rightarrow$ \textbf{DL}；
+  \item 否则若标签可发且锚点未同步 $\rightarrow$ \textbf{SUL}；
+  \item 否则标签可发且锚点已同步 $\rightarrow$ \textbf{AUL}。
+\end{enumerate}
+
+与三大方式的层级：RTT（点对点）/ FLAG（成组快速）/ 跳频（CSI 拼接）为 6.6.2 并列大类；M2M/DL/SUL/AUL 仅是\textbf{FLAG 内部}的测量策略分叉，下一节方式三跳频为独立第三条路径。
+
+%======================================================================
+\subsection{方式三：跳频复合测距端到端（6.6.2.3）}
+%======================================================================
+
+\subsection{适用条件与路径定位}
+
+\begin{itemize}[nosep]
+  \item \textbf{可选}能力（6.6.2 首段）；与 RTT 必选、FLAG 可选并列，为第三条独立测距路径。
+  \item \textbf{核心量}：各载波 CSI（6.5.5.6），非 TOA/TOD（6.5.5.7）；通过多载波跳频拼接等效大带宽 CSI 再解距离。
+  \item \textbf{不依赖}测量组建立、测量组参数配置、GCI 第四格式激活；配置入口为能力交互 + 位置测量信号配置消息。
+  \item \textbf{仍依赖} Step 0 能力就绪；Step 2 同步在跳频测量交互中由``T 节点以 G 同步信号/测量帧为基准''体现（6.6.2.3.3）。
+\end{itemize}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{2.2cm}L{4.5cm}L{4.5cm}}
+\toprule
+\textbf{对比项} & \textbf{RTT / FLAG} & \textbf{跳频复合} \\
+\midrule
+开测扳机 & GCI 资源或 GCI-4 激活 & 配置下发 + 跳频流程定时 \\
+空口形态 & 顺序 PMS / 组内排队 & 多载波测距帧 + 跳频切换 \\
+报告载体 & 时间差/TOA 报告 & 位置测量信号测量反馈（CSI） \\
+解算输入 & $T_a$--$T_d$ 或 TOA 集 & 多载波双向复合 CSI \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Step H1 能力交互与跳频配置（6.6.2.3.2）}
+
+\textbf{步骤作用}：在\textbf{初始工作信道}完成跳频能力确认与全量参数下发；G 配置锚点与标签角色后，成员持有跳频图案与射频/LBT 约束。
+
+\begin{enumerate}
+  \item G 与 T 互发定位能力查询/反馈，确认双方\textbf{跳频能力}。
+  \item G 下发\textbf{位置测量信号配置消息}，参数 a)--l) 如下表。
+  \item G 通过 GCI 或 XRC 为第一/第二测量信号配置时频资源（6.6.2.3.1 末段）。
+  \item \textbf{输出}：\texttt{HOP\_CONFIGURED}；本地保存 \texttt{hop\_pattern[]}、$T_{\mathrm{RF}}$、LBT 窗口、生成方式、CSI 模式等。
+\end{enumerate}
+
+\begin{table}[h]
+\centering
+\small
+\caption{位置测量信号配置消息参数（6.6.2.3.2 a)--l)）}
+\begin{tabular}{L{0.8cm}L{3.2cm}L{4.5cm}L{4cm}}
+\toprule
+\textbf{项} & \textbf{参数} & \textbf{工程含义} & \textbf{实现注意} \\
+\midrule
+a) & 跳频载波信道号 & 多基础载波时指\textbf{最低频}基础载波信道号 & 与反馈中载波信道号编码一致 \\
+b) & PMS 带宽 & 各跳基础载波（组）可重叠 & 影响 CSI 子载波布局 \\
+c) & 跳频图案 & 初始工作信道 + $\ge 1$ 跳频信道；决定切换顺序 & 状态机按数组索引推进 \\
+d) & 端口/波束/重复次数 & 测距信号形态 & 与 H1a 端口/波束维数一致 \\
+e) & 无线帧结构 & 配比、起始、长度 & 跳频信道可用一般/边界 CP 帧结构 \\
+f) & 测量符号资源 & 跳频信道：全 G 或全 T 测量符号；初始信道可跟当前 TTI/超帧 & 初始信道也可全 G/全 T \\
+g) & $T_{\mathrm{RF}}$ & 切下一跳前射频稳定时间 & 必须 $\max(T_{\mathrm{RF},1},T_{\mathrm{RF},2})$ \\
+h) & 连续/非连续发送 & 非连续须 LBT & 与 i) 联动 \\
+i) & LBT 最大窗口期 & 超时则切下一跳，避免卡在同一信道 & G：占不到信道则跳；T：检不到 G 则跳 \\
+j) & 生成方式 & CSI-RS / SRS / PMS 三选一 & 对接 6.2.3.9 或对应参考信号 \\
+k) & 子载波分组 $P$ & 部分反馈时分组粒度 & 协商阶段由 G 指示 \\
+l) & CSI 模式 & 全符号平均，或第 $k$ 个测距符号 & 决定本地 CSI 聚合方式 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+多锚点场景：G 另发\textbf{位图}，指示各锚点/标签在每次测量交互中占用的发/收时频资源（6.6.2.3.3 末段）。
+
+\subsection{Step H1a 单载波双向复合测量单元（6.6.2.3.1）}
+
+\textbf{步骤作用}：在\textbf{每一个}跳频载波上，第一/第二位置节点完成一轮双向测距帧交互，产出该载波本地 CSI；多载波完成后由 H5 做跨载波拼接。
+
+\textbf{基于天线端口}（$N_{\mathrm{port}}$ / $M_{\mathrm{port}}$）：
+\begin{enumerate}[nosep]
+  \item $T_1$：第一设备发 $N_{\mathrm{port}}$ 路测距信号；
+  \item $T_2$：第二设备收，得 $M_{\mathrm{port}}$ 组 CSI；
+  \item $T_3$：第二设备发 $M_{\mathrm{port}}$ 路测距信号（$T_3$ 与 $T_4$ 相等）；
+  \item $T_4$：第一设备收，得 $N_{\mathrm{port}}$ 组 CSI；
+  \item 解算节点对 $N_{\mathrm{port}}\times M_{\mathrm{port}}$ 条双向信道做\textbf{复合}。
+\end{enumerate}
+
+\textbf{基于波束}（$N_{\mathrm{beam}}$）：
+\begin{enumerate}[nosep]
+  \item 第一设备发 $N_{\mathrm{beam}}$ 个波束测距信号；
+  \item 第二设备收/发时，波束顺序与多天线处理须与第一设备发送顺序\textbf{匹配}；
+  \item 解算节点对匹配的 $N_{\mathrm{beam}}$ 个双向波束信道复合。
+\end{enumerate}
+
+\textbf{需要/从哪来}：测距波形由 j) 所选生成方式产生；CSI 测量量定义 6.5.5.6；时频由 GCI/XRC 指示。
+
+\subsection{Step H2 初始信道配置与首跳测量（标准步骤 1--2）}
+
+\textbf{步骤作用}：成员在初始工作信道获取跳频配置并完成第一轮双向测量，再按图案切至第二信道（组）。
+
+\begin{enumerate}
+  \item 锚点/标签在初始工作信道就绪；G 在此信道发前导时，\textbf{版本信息域 $=$ \texttt{00}}（6.6.2.3.3 步骤 1）。
+  \item 执行 H1a 双向测量交互：第一/第二节点各可发\textbf{一个或多个连续测量帧}；帧个数由 XRC 或前导指示。
+  \item \textbf{初始信道测量帧规则}：可用当前超帧/TTI 无线帧结构；或 G 帧全 G 测量符号、T 帧全 T 测量符号。
+  \item 每个测量符号承载测量信息，对侧据此计算该基础载波（组）CSI。
+  \item 交互结束后，按跳频图案切至第二个信道（组）；切换前满足 $T_{\mathrm{RF}}$。
+  \item \textbf{同步基准}：所有 T 节点以 G 发送的同步信号或测量帧为基准（6.6.2.3.3）。
+\end{enumerate}
+
+\textbf{输出}：初始信道本地 CSI 缓存；信道状态 $\rightarrow$ 第二跳。
+
+\subsection{Step H3 跳频信道逐跳测量（标准步骤 3）}
+
+\textbf{步骤作用}：在第二跳及后续各跳重复 H1a 交互，并按图案推进；处理非连续 LBT 与跳频前导标识。
+
+\begin{enumerate}
+  \item 切换至跳频工作信道后，再执行一轮（或多轮）双向测量交互。
+  \item 测量交互结束后，等待 $T_{\mathrm{RF}}$，再按图案切下一跳。
+  \item G 在跳频工作信道发前导时，\textbf{版本信息域 $=$ \texttt{01}}，指示跳频信道上发送位置测量帧。
+  \item \textbf{跳频信道测量帧}：支持一般 CP 与边界 CP 的全部无线帧结构；可为全 G 或全 T 测量符号。
+  \item \textbf{非连续模式（LBT）}：在第二跳及以后，若需非连续发送，则持续 LBT 直至占用信道发 SAB/同步信息，或 LBT 时长达到\textbf{最大窗口期}则按图案切下一跳（G：窗口内未占用；T：窗口内未检测到 G 信号）。
+\end{enumerate}
+
+\textbf{输出}：各跳 CSI 按载波信道号索引缓存；最后一跳完成后进入 H4。
+
+\subsection{Step H4 回初始信道与 CSI 反馈（标准步骤 4）}
+
+\textbf{步骤作用}：全图案测完后回到初始工作信道，经测量反馈消息上报各跳 CSI，供解算节点复合。
+
+\begin{enumerate}
+  \item 在最后一跳完成测距交互后，按跳频图案\textbf{跳回初始工作信道}。
+  \item 第一/第二位置节点经\textbf{位置测量信号测量反馈消息}向 G（或解算节点）上报各信道 CSI。
+  \item 反馈模式：
+  \begin{itemize}[nosep]
+    \item \textbf{全反馈}：每基础载波 160 个有效子载波各 1 个 CSI IQ；DC 不反馈；带 20MHz 基础载波信道号；载波间间隔子载波不反馈；
+    \item \textbf{部分反馈}：160 子载波分组，$P=2/4/8$（均匀）或 per-carrier $P\neq Q$（非均匀）；每组 1 个 IQ；$P$ 在协商阶段指示。
+  \end{itemize}
+  \item CSI 测量量定义见 6.5.5.6；消息封装属 MAC/高层，PHY/流程模块提供 CSI IE 与上报触发。
+\end{enumerate}
+
+\subsection{Step H5 双向复合与距离解算}
+
+\textbf{步骤作用}：解算节点消费 H4 汇聚的各载波 CSI，完成 per-carrier 双向复合与跨载波拼接，输出距离 $D$。
+
+\begin{enumerate}
+  \item 对每个测过的基础载波：取第一节点 CSI 与第二节点 CSI，按 6.6.2.3.1 规则做\textbf{双向复合}。
+  \item 将多载波双向复合 CSI \textbf{拼接}为等效大带宽信道状态信息。
+  \item 由等效 CSI 解算锚点--标签距离（算法实现属 M5/M7；标准给出方法框架，具体 IFFT/相关峰在实现文档外可插拔）。
+  \item \textbf{输出}：点对点距离 $D$；若多对节点则形成距离集，可交 6.6.4。
+\end{enumerate}
+
+\subsection{跳频状态机}
+
+\texttt{UNCONFIGURED} $\rightarrow$ \texttt{HOP\_CONFIGURED}（H1）$\rightarrow$ \texttt{MEAS\_INITIAL}（H2，前导 \texttt{00}）$\rightarrow$ \texttt{HOPPING}（H3，前导 \texttt{01}，可含 LBT）$\rightarrow$ \texttt{RETURN\_INITIAL} $\rightarrow$ \texttt{CSI\_REPORTING}（H4）$\rightarrow$ \texttt{RESOLVE}（H5）$\rightarrow$ \texttt{IDLE}。
+
+与 FLAG 状态机\textbf{独立}：无 \texttt{SYNCED}/\texttt{ACTIVE}（GCI-4）阶段；开测由配置 + 跳频定时驱动。
+
+\subsection{跳频数据流一览}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{步骤} & \textbf{输入} & \textbf{来源} & \textbf{输出} \\
+\midrule
+H1 & 能力 + 配置 a)--l) & 第 7 章 + 6.6.2.3.2 & 跳频上下文 \\
+H1a & 测距帧时频 & GCI/XRC & 单载波 CSI（6.5.5.6） \\
+H2 & 图案[0] 初始信道 & H1 + 6.2 定时 & CSI$_0$ + 切至跳 1 \\
+H3 & 图案[1..N] & $T_{\mathrm{RF}}$/LBT 定时 & CSI$_1$..CSI$_N$ \\
+H4 & 各跳 CSI 缓存 & 本地测量 & 测量反馈 PDU \\
+H5 & 反馈汇聚 CSI & H4 & 复合 CSI $\rightarrow D$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{实现模块与接口核心详解}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{模块} & \textbf{建议单元} & \textbf{主要输入 $\rightarrow$ 输出} \\
+\midrule
+M1 & \texttt{slb\_xrc\_*} / \texttt{slb\_meas\_group\_msg\_*} & 空口 PDU $\rightarrow$ 配置结构体 \\
+M2 & \texttt{slb\_gci\_pos\_*} / \texttt{slb\_tci\_pos\_*} & 82/85 bit $\rightarrow$ 激活/资源描述 \\
+M3 & \texttt{slb\_pms\_*} + 时间戳 API & 符号索引 $\rightarrow$ TOD/TOA \\
+M4 & \texttt{slb\_pos\_flag\_fsm\_*} + mode\_* & 配置+GCI 事件 $\rightarrow$ TX/RX 命令 \\
+M5 & \texttt{slb\_pos\_rtt\_*} / \texttt{slb\_pos\_tdoa\_*} / \texttt{slb\_pos\_csi\_resolve\_*} & $T_a$--$T_d$、TOA 集或复合 CSI $\rightarrow$ $D$ \\
+M6 & \texttt{slb\_pos\_fix\_*}（6.6.4） & 距离矩阵/TOA $\rightarrow$ 坐标 \\
+M7 & \texttt{slb\_pos\_hop\_fsm\_*} + \texttt{slb\_csi\_*} + 反馈组装 & 图案+$T_{\mathrm{RF}}$/LBT $\rightarrow$ 各跳 CSI + 反馈 IE \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{G 侧与锚点/标签侧职责}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{2.5cm}L{6cm}L{4.5cm}}
+\toprule
+\textbf{角色} & \textbf{必须实现} & \textbf{可选} \\
+\midrule
+G 调度 & M1 发送、M2 GCI-4/资源指示、报告汇聚、M5/M6/M7 & 自身兼锚点时含 M3/M4/M7 \\
+锚点 & M1 接收、M2 解析、M3、M4（按模式 TX/RX）、报告；M2 TCI（第一锚点且类型 2）；跳频 M7 & 本地解算 \\
+标签 & M1 接收、M2 解析、M3、M4（M2M/SUL/AUL）、报告；跳频时 M7 双向测距帧 & 类型 2 本地解算 \\
+解算节点 & 收报告 + M5 + M6；跳频收 CSI 反馈 + M7 复合 & 可为 G 或指定 T \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{推荐实现顺序}
+
+\begin{enumerate}[nosep]
+  \item M5 RTT 公式 + 时间戳 mock；
+  \item M4 状态机 + 仅 M2M 顺序表；
+  \item M2 GCI-4 解析/生成；
+  \item M1 建组/参数解析（或测试台灌配置）；
+  \item M3 对接真实 PMS；
+  \item 报告通路 + M6；
+  \item 扩展 DL / AUL / SUL；
+  \item M7 跳频 H1--H5：图案状态机 $\rightarrow$ 单载波 CSI $\rightarrow$ 反馈 $\rightarrow$ 复合解算。
+\end{enumerate}
+
+%======================================================================
+\section{约束与实现要点}
+%======================================================================
+
+\begin{enumerate}[nosep]
+  \item \textbf{【分层】}：XRC 仅高层组包；PHY 禁止自行构造 ASN.1 XRC。
+  \item \textbf{【激活】}：FLAG 测量必须在 GCI 第四格式激活后开始；激活前不得发组内测距 PMS。
+  \item \textbf{【顺序】}：PhyID 列表同时约束发信顺序与报告顺序，实现不得重排。
+  \item \textbf{【隔离】}：专用 PMS 的 $u$ 与同步块 $u$ 不同，配置校验失败则拒配。
+  \item \textbf{【间隔】}：M2M 轮次间、DL 锚点间空闲符号不满足则拒配或停测。
+  \item \textbf{【SUL】}：必须两次 GCI-4；缺同步步骤不得进入标签上行阶段。
+  \item \textbf{【能力】}：无 OFDM 定位能力不得宣称支持 RTT；FLAG/跳频按能力位可选。
+  \item \textbf{【报告方向】}：类型 1/2 与 GCI-4 第 10--11 bit、measReportDirection 一致，避免一端发送一端无资源。
+  \item \textbf{【多端口】}：$t_1$--$t_6$ 须基于多端口/多波束联合测量（6.6.2.1）。
+  \item \textbf{【周期】}：DL 场景测量周期为 0 时仅执行一次双向测量及对应报告。
+  \item \textbf{【跳频路径】}：不得依赖测量组/GCI-4 开测；须能力交互 + 位置测量信号配置 a)--l) 齐套。
+  \item \textbf{【TRF】}：跳频切换前必须等待 $T_{\mathrm{RF}}=\max(T_{\mathrm{RF},1},T_{\mathrm{RF},2})$，否则下一跳发收失准。
+  \item \textbf{【前导】}：初始信道前导版本 \texttt{00}、跳频信道 \texttt{01}，实现须与信道状态一致。
+  \item \textbf{【LBT】}：非连续跳频时，LBT 达最大窗口期必须切下一跳，禁止无限占用同一信道。
+  \item \textbf{【跳频同步】}：测量交互中 T 节点以 G 同步信号/测量帧为基准，不得各自独立定帧。
+  \item \textbf{【CSI 反馈】}：全/部分反馈模式与协商 $P$ 一致；CSI 定义 6.5.5.6，承载于位置测量信号测量反馈消息。
+\end{enumerate}
+
+%======================================================================
+\section{与标准其他章节的衔接}
+%======================================================================
+
+\begin{itemize}[nosep]
+  \item 配置与角色 $\leftarrow$ 6.6.1 + 第 7.5 章；
+  \item 空口控制 $\leftarrow$ 6.2.4；波形 $\leftarrow$ 6.2.3.9；时间戳 $\leftarrow$ 6.5.5.7；CSI $\leftarrow$ 6.5.5.6；
+  \item 距离/TOA 输出 $\rightarrow$ 6.6.4；角度增强 $\rightarrow$ 6.6.3。
+\end{itemize}
+
+\subsection{端到端验收清单}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{2.2cm}L{10.5cm}}
+\toprule
+\textbf{路径} & \textbf{验收要点} \\
+\midrule
+RTT & GCI1--3 或 XRC 配置后完成两/三信号，解算 $D$ 与公式一致 \\
+M2M & 图 12 四步可观测；三轮顺序正确；类型 1 或 2 报告可达；得 $\{D_{ij}\}$ \\
+DL & 标签无 TX；锚点互测；周期 0 时仅一轮；TDOA 输入齐全 \\
+SUL & 两次 GCI-4；同步后标签上行；多锚点 TOA 齐套 \\
+AUL & 单次激活；仅标签 TX；TOA 报告完整 \\
+跳频 & H1 配置 a)--l) 生效；H2/H3 前导 00/01 与 $T_{\mathrm{RF}}$/LBT 可观测；H4 各载波 CSI 反馈齐套；H5 复合后 $D$ 合理 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{各方式一步对照总表}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{1.6cm}L{2.8cm}L{3.5cm}L{5cm}}
+\toprule
+\textbf{方式} & \textbf{配置从哪来} & \textbf{开测扳机} & \textbf{测量与输出} \\
+\midrule
+RTT & XRC + GCI1--3 & GCI 资源指示或静态时刻 & 两/三 PMS $\rightarrow D$ \\
+M2M & 建组+参数+XRC 组播 & GCI-4 & 三轮 PMS $\rightarrow$ 时间差 $\rightarrow\{D_{ij}\}$ \\
+DL & 建组+参数（全锚点） & GCI-4 & 锚点互测 $\rightarrow$ DL-TDOA \\
+SUL & 建组+参数+使能 DL & GCI-4 $\times 2$ & 同步后上行 $\rightarrow$ TOA $\rightarrow$ TDOA \\
+AUL & 建组+参数 & GCI-4 $\times 1$ & 标签上行 $\rightarrow$ TOA $\rightarrow$ TDOA \\
+跳频 & 能力+位置测量信号配置 & 配置+跳频定时（无 GCI-4） & 多载波双向 CSI 复合 $\rightarrow D$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\vfill
+\begin{center}
+\small\textcolor{gray}{%
+字段级定义与完整参数以 T/XS 10001-2025 第 6 章及 6.6.1--6.6.2、6.2.3.9、6.2.4.6.6/6.7、6.5.5.6--6.5.5.8、第 7.5 章为准；\\
+本文档提供 6.6.2 距离位置信息测量（含 FLAG 快速定位）的工程解读与端到端流水线，供 SLB 实现与联调参考。%
+}
+\end{center}
+
+\end{document}

@@ -262,6 +262,7 @@ RSRP 与 RSSI 须\textbf{同一测量符号}；多天线取 max。
 \textbf{IQ 联合编码}：
 \begin{equation}
 \mathrm{IQ[\dBm]} = 20\log_{10}\!\left(\frac{|\mathrm{IQ[linear]}|}{1024}\right) + \mathrm{RPL[\dBm]}
+\label{eq:iqdbm}
 \end{equation}
 
 \begin{table}[h]
@@ -351,13 +352,77 @@ RPL[dBm] & 12 bit 有符号 & 相对参考功率 \\
 \begin{table}[h]
 \centering
 \small
-\begin{tabular}{llll}
+\begin{tabular}{p{3.2cm}p{4.8cm}p{4.8cm}p{1.5cm}}
 \toprule
 \textbf{接口} & \textbf{输入} & \textbf{输出} & \textbf{说明} \\
 \midrule
-\texttt{slb\_meas\_pms\_csi} & 频域 IQ[] & IQ[linear], RPL & 6.5.5.6 \\
-\texttt{slb\_meas\_pms\_timediff} & $t_1\ldots t_6$ & $T$ 或 $T_1,T_2$ & 6.5.5.7 \\
-\texttt{slb\_meas\_pms\_aoa} & 阵列快照 & 水平角、垂直角 & 6.5.5.8 \\
+\texttt{slb\_meas\_pms\_csi} &
+测距符号频域 IQ[]、CSI 模式(1/2)、$N_{\mathrm{RX}}$/$N_{\mathrm{TX}}$ &
+\texttt{IQ[linear]}、\texttt{RPL[dBm]}（按子载波） &
+6.5.5.6 \\
+\texttt{slb\_meas\_pms\_timediff} &
+TOA/TOD 时间戳 $t_1\ldots t_6$、信号数(2/3)、节点角色 &
+$T$ 或 $T_1,T_2$ &
+6.5.5.7 \\
+\texttt{slb\_meas\_pms\_aoa} &
+阵列频域/空域接收快照[]、$N_{\mathrm{RX}}$ &
+水平角 $[0,360)$°、垂直角 $[0,180]$° &
+6.5.5.8 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{6.5.5.6 PMS CSI 接口 \texttt{slb\_meas\_pms\_csi}}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{2.2cm}p{0.9cm}p{2.8cm}p{0.7cm}p{5.8cm}}
+\toprule
+\textbf{变量} & \textbf{方向} & \textbf{类型} & \textbf{长度} & \textbf{说明} \\
+\midrule
+\texttt{freq\_iq[]} & 输入 & \texttt{const slb\_complex\_t *} & $N_{\mathrm{sc}}$ & 测距符号到达接收天线连接器的频域 IQ 样本 \\
+\texttt{mode} & 输入 & \texttt{uint8\_t} & 1 & 1=全测距帧算术平均；2=第 $n$ 个测距符号反馈 \\
+\texttt{n\_rx}, \texttt{n\_tx} & 输入 & \texttt{uint8\_t} & 1 & 接收/发送天线端口数 \\
+\texttt{n\_sc} & 输入 & \texttt{uint16\_t} & 1 & 有效子载波数（不含 DC） \\
+\texttt{iq\_linear[]} & 输出 & \texttt{int16\_t *} & $N_{\mathrm{sc}}$ & 12\,bit 有符号相对线性幅度 \\
+\texttt{rpl\_dBm[]} & 输出 & \texttt{int16\_t *} & $N_{\mathrm{sc}}$ & 12\,bit 有符号相对参考功率标尺 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{6.5.5.7 PMS 时间差接口 \texttt{slb\_meas\_pms\_timediff}}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{2.2cm}p{0.9cm}p{2.2cm}p{0.7cm}p{5.8cm}}
+\toprule
+\textbf{变量} & \textbf{方向} & \textbf{类型} & \textbf{长度} & \textbf{说明} \\
+\midrule
+\texttt{t[6]} & 输入 & \texttt{const double *} & 6 & PMS 本地参考时间下的 TOA/TOD：$t_1\ldots t_6$ \\
+\texttt{n\_signals} & 输入 & \texttt{uint8\_t} & 1 & 2=双向两信号；3=双向三信号 \\
+\texttt{node\_role} & 输入 & \texttt{uint8\_t} & 1 & 1=第一位置节点；2=第二位置节点 \\
+\texttt{T} & 输出 & \texttt{double *} & 1 & 两信号：第一节点 $T=t_4-t_1$，第二节点 $T=t_3-t_2$ \\
+\texttt{T1}, \texttt{T2} & 输出 & \texttt{double *} & 2 & 三信号：第一节点 $T_1=t_4-t_1$，$T_2=t_5-t_4$；第二节点 $T_1=t_3-t_2$，$T_2=t_6-t_3$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{6.5.5.8 PMS AoA 接口 \texttt{slb\_meas\_pms\_aoa}}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{2.4cm}p{0.9cm}p{2.8cm}p{1.2cm}p{5.3cm}}
+\toprule
+\textbf{变量} & \textbf{方向} & \textbf{类型} & \textbf{长度} & \textbf{说明} \\
+\midrule
+\texttt{array\_snap[]} & 输入 & \texttt{const slb\_complex\_t *} & $N_{\mathrm{RX}}\times N_{\mathrm{snap}}$ & PMS 在天线阵列处的频域/空域接收快照 \\
+\texttt{n\_rx} & 输入 & \texttt{uint8\_t} & 1 & 阵列天线单元数 \\
+\texttt{n\_snap} & 输入 & \texttt{uint16\_t} & 1 & 用于 DOA 估计的快照数 \\
+\texttt{azimuth\_deg} & 输出 & \texttt{float *} & 1 & 水平角，相对 $X$ 轴逆时针 $[0,360)$° \\
+\texttt{elevation\_deg} & 输出 & \texttt{float *} & 1 & 垂直角，相对 $Z$ 轴 $[0,180]$° \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -411,6 +476,18 @@ RPL[dBm] & 12 bit 有符号 & 相对参考功率 \\
 
 输入：测量窗口内符号功率序列、DT 前导检测结果、帧长；输出：$\mathrm{CBRA}\in[0,1]$。
 
+\subsection{\texttt{slb\_meas\_pms\_csi}}
+
+输入：测距符号频域 IQ 样本 \texttt{freq\_iq[]}、CSI 模式 \texttt{mode}（1=全帧平均，2=特定测距符号）、天线端口数与子载波数；输出：各子载波 \texttt{iq\_linear[]} 与 \texttt{rpl\_dBm[]}（式\eqref{eq:iqdbm} 联合编码字段）。
+
+\subsection{\texttt{slb\_meas\_pms\_timediff}}
+
+输入：PMS 本地参考时间坐标系下 TOA/TOD 时间戳 \texttt{t[6]}、传输信号数 \texttt{n\_signals}（2 或 3）、本节点角色 \texttt{node\_role}；输出：两信号时为单个 $T$，三信号时为 $T_1,T_2$（定义见 6.5.5.7）。
+
+\subsection{\texttt{slb\_meas\_pms\_aoa}}
+
+输入：PMS 在天线阵列处的接收快照 \texttt{array\_snap[]}；输出：参考坐标系（$Z$ 法线、$X$ 正南、$Y$ 正东）下的水平角 \texttt{azimuth\_deg} 与垂直角 \texttt{elevation\_deg}。
+
 %======================================================================
 \section{处理步骤}
 %======================================================================
@@ -461,9 +538,29 @@ RPL[dBm] & 12 bit 有符号 & 相对参考功率 \\
 \subsection{6.5.5.6 PMS CSI 编码}
 
 \begin{enumerate}
-  \item 估计子载波 $k$ 信道系数 IQ[linear]；
-  \item 配置 RPL[dBm] 标尺；
-  \item 按式计算 IQ[dBm] 供 6.6 解码。
+  \item 对测距符号到达接收天线连接器的频域样本，按模式 1 全帧平均或模式 2 选取第 $n$ 个测距符号；
+  \item 估计各有效子载波 $k$ 的信道系数，得 \texttt{IQ[linear]}（12\,bit 有符号）；
+  \item 配置各子载波 \texttt{RPL[dBm]} 标尺（12\,bit 有符号）；
+  \item 按式\eqref{eq:iqdbm} 计算 \texttt{IQ[dBm]} 供 6.6 解码与测距解算。
+\end{enumerate}
+
+\subsection{6.5.5.7 PMS 时间差}
+
+\begin{enumerate}
+  \item 在 PMS 本地参考时间坐标系下，记录各 PMS 开端到达发送/接收天线连接器的 TOA/TOD，得 $t_1\ldots t_6$；
+  \item 若 PMS 含多端口/波束分量，按标准规定对分量联合测量（加权平均等）后再填入 $t_i$；
+  \item 两信号：第一节点 $T=t_4-t_1$，第二节点 $T=t_3-t_2$；
+  \item 三信号：第一节点 $T_1=t_4-t_1$、$T_2=t_5-t_4$；第二节点 $T_1=t_3-t_2$、$T_2=t_6-t_3$；
+  \item 输出 $T$ 或 $T_1,T_2$ 供 6.6 RTT 距离解算。
+\end{enumerate}
+
+\subsection{6.5.5.8 PMS AoA}
+
+\begin{enumerate}
+  \item 采集 PMS 在天线阵列各单元上的频域/空域接收快照；
+  \item 采用 MUSIC、ESPRIT 或波束扫描等 DOA 算法估计到达方向；
+  \item 映射至参考坐标系：$Z$ 轴为椭球法线，$X$ 正南，$Y$ 正东；
+  \item 输出水平角（相对 $X$ 轴逆时针，$[0,360)$°）与垂直角（相对 $Z$ 轴，$[0,180]$°）。
 \end{enumerate}
 
 %======================================================================

@@ -201,6 +201,40 @@ r_{n,l}(m) = \frac{1}{\sqrt{2}}\bigl(2c(2m)-1\bigr) + j\,\frac{1}{\sqrt{2}}\bigl
 
 所需 Gold 长度 $M_{\mathrm{PN}}=322$；DC 子载波 $k{=}80$ 置零。
 
+$c_{\mathrm{init}}$ 由 $n$、$l$、$N_{\mathrm{ID}}$、$N_{\mathrm{CP}}$ 共同决定，各参数含义与取值如下：
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{2.5cm}p{4.5cm}p{7cm}}
+\toprule
+\textbf{参数} & \textbf{含义} & \textbf{取值范围} \\
+\midrule
+$n$ & 超帧内无线帧号 & $n = 0, 1, \ldots, 7$ \\
+$N_{\mathrm{ID}}$ & G 节点标识低 8 位 & $0, 1, \ldots, 255$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+通信域 CP-OFDM 符号类型与符号编号 $l$、循环前缀类型 $N_{\mathrm{CP}}$ 的对应关系：
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{4.8cm}p{3.8cm}p{1.8cm}p{3.6cm}}
+\toprule
+\textbf{CP-OFDM 符号类型} & \textbf{符号编号 $l$} & \textbf{$N_{\mathrm{CP}}$} & \textbf{说明} \\
+\midrule
+类型一 A 或类型一 B & $l = 0, 1, \ldots, 13$ & 3 & 每无线帧 14 个符号 \\
+类型二 & $l = 0, 1, \ldots, 12$ & 2 & 每无线帧 13 个符号 \\
+类型三 & $l = 0, 1, \ldots, 11$ & 1 & 每无线帧 12 个符号 \\
+类型四 & $l = 0, 1, \ldots, 9$ & 0 & 每无线帧 10 个符号 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+$N_{\mathrm{CP}} \in \{0, 1, 2, 3\}$ 表示通信域使用的循环前缀类型；$N_{\mathrm{CP}}{=}3$ 对应类型一 A/B，$N_{\mathrm{CP}}{=}2$ 对应类型二，$N_{\mathrm{CP}}{=}1$ 对应类型三，$N_{\mathrm{CP}}{=}0$ 对应类型四。
+
 \textbf{标准算例}（$n{=}0,l{=}0,N_{\mathrm{ID}}{=}5,N_{\mathrm{CP}}{=}3$）：
 $c_{\mathrm{init}}=344087$，$c(0\ldots 4)=0,1,1,1,0$。
 
@@ -253,7 +287,10 @@ $c_{\mathrm{init}}=344087$，$c(0\ldots 4)=0,1,1,1,0$。
 \toprule
 \textbf{变量} & \textbf{方向} & \textbf{类型} & \textbf{含义} \\
 \midrule
-\texttt{param.n/l/N\_ID/N\_CP} & 输入 & \texttt{uint8\_t} & 时频/小区/CP 参数 \\
+\texttt{param.n} & 输入 & \texttt{uint8\_t} & 无线帧号 $n{=}0\ldots 7$ \\
+\texttt{param.l} & 输入 & \texttt{uint8\_t} & 符号号 $l$，见 CP-OFDM 类型表 \\
+\texttt{param.N\_ID} & 输入 & \texttt{uint8\_t} & G 节点标识低 8 位 \\
+\texttt{param.N\_CP} & 输入 & \texttt{uint8\_t} & CP 类型 $0\ldots 3$ \\
 \texttt{r} & 输出 & \texttt{slb\_cpx\_f32\_t *} & 161 个 QPSK 符号 \\
 \texttt{r\_cap} & 输入 & \texttt{uint32\_t} & $\geq 161$ \\
 \bottomrule
