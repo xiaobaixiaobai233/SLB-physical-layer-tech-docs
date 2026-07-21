@@ -1,0 +1,724 @@
+% !TEX program = xelatex
+\documentclass[11pt,a4paper]{ctexart}
+
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{longtable}
+\usepackage{array}
+
+\geometry{left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm}
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue}
+
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+
+\title{%
+  \textbf{星闪 SLB 物理层}\\[0.4em]
+  \Large 6.6.2.3 基于双向复合信道的测距技术文档\\[0.3em]
+  \large 测量方法 \textbullet\ 测量配置 \textbullet\ 测量流程 \textbullet\ 反馈方式
+}
+\author{依据 T/XS 10001-2025《星闪无线通信系统 接入层\\
+同步低时延宽带空口 SLB 技术要求和测试方法》整理\\
+（团体标准 20250326 版）\\[0.3em]
+\small 正文顺序与标准一致：6.6.2.3.1 方法 $\rightarrow$ 6.6.2.3.2 配置 $\rightarrow$ 6.6.2.3.3 流程 $\rightarrow$ CSI 反馈；每步标注所需输入与先前章节}
+\date{2026 年 7 月 21 日}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+%======================================================================
+\part{总览}
+%======================================================================
+
+\section{文档范围与模块划分}
+
+本节对应 T/XS 10001-2025 第 6 章 \textbf{6.6.2.3}。位置锚点与位置标签通过跳频在多载波上估计 CSI，生成双向复合信道并拼接为等效大带宽 CSI，由解算节点估计距离。本文档按标准条文顺序组织，并在各块内列出``需要什么 / 先前章节''。
+
+\begin{table}[h]
+\centering
+\small
+\caption{6.6.2.3 子节与本文档章节对应}
+\begin{tabular}{clp{7cm}}
+\toprule
+\textbf{标准子节} & \textbf{主题} & \textbf{本文档对应} \\
+\midrule
+6.6.2.3.1 & 跳频测量方法 & 第\ref{sec:method} 节 \\
+6.6.2.3.2 & 跳频测量配置 & 第\ref{sec:config} 节 \\
+6.6.2.3.3 & 跳频测量流程 & 第\ref{sec:flow} 节 \\
+6.6.2.3.3 续 & CSI 反馈方式 & 第\ref{sec:feedback} 节 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{与相关章节的关系}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{2.8cm}L{1.5cm}L{9cm}}
+\toprule
+\textbf{节号} & \textbf{关系} & \textbf{说明} \\
+\midrule
+6.6.1 & 上游 & 锚点/标签/解算角色与资源配置 \\
+6.6.2.1 / 6.6.2.2 & 并列 & RTT / FLAG；本路径不用测量组与 GCI-4 \\
+6.2.2 & 上游 & 超帧/TTI/无线帧/符号、CP \\
+6.2.3 / 6.2.3.9 & 上游 & 同步信号、SAB、PMS 等波形 \\
+6.2.4.6.6 & 上游 & GCI 位置测量资源指示（格式 0--2） \\
+6.5.x & 上游 & 参考信号；配置 j) \\
+6.5.5.6 & 上游 & CSI 测量量定义 \\
+第 7 章 & 上游 & XRC、能力/配置/反馈消息 \\
+附录 L & 参考 & 双向复合 IQ 相乘与相位--距离关系 \\
+6.6.4 & 下游 & 距离 $\rightarrow$ 坐标（可选） \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{阅读顺序说明}
+
+按技术要求顺序阅读：\textbf{测量方法}（单载波怎么测、怎么复合）$\rightarrow$ \textbf{测量配置}（a)--l) 配什么）$\rightarrow$ \textbf{测量流程}（四步怎么跳）$\rightarrow$ \textbf{反馈方式}（CSI 怎么报、表 18）。实现时配置发生在流程步骤 1，但规范条文先定义方法再定义配置。
+
+\newpage
+%======================================================================
+\part{6.6.2.3 工程解读}
+%======================================================================
+
+\section{协议章节对应}
+
+对应 T/XS 10001-2025 第 6 章 6.6.2.3，涵盖 6.6.2.3.1、6.6.2.3.2、6.6.2.3.3（含 CSI 反馈）。
+
+\section{功能定义}
+
+\begin{enumerate}[nosep]
+  \item 定义端口/波束双向测量与复合方法；
+  \item 在初始工作信道完成能力交互与跳频参数配置；
+  \item 按跳频图案执行多载波测量交互；
+  \item 按全反馈或部分反馈上报 CSI，解算节点复合、拼接并估计距离。
+\end{enumerate}
+
+\section{模块边界（上下游及职责划分）}
+
+\subsection{上游模块}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{3.5cm}L{4cm}L{5.5cm}}
+\toprule
+\textbf{上游} & \textbf{输入} & \textbf{说明} \\
+\midrule
+6.6.1 & 角色指派 & 锚点/标签/解算 \\
+第 7 章 & 能力与配置/反馈消息 & 控制面 \\
+6.2.2 / 6.2.3 / 6.2.3.9 & 帧结构、同步/SAB、PMS & 空口基础 \\
+6.2.4.6.6 & GCI 时频 & 第一/第二测量信号 \\
+6.5.5.6 / 附录 L & CSI 定义、复合相位 & 测量与解算 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{下游模块}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{3.5cm}L{4cm}L{5.5cm}}
+\toprule
+\textbf{下游} & \textbf{输出} & \textbf{说明} \\
+\midrule
+解算节点 & 复合 CSI、距离 $D$ & 本节目的输出 \\
+6.6.4 & 距离集 & 可选坐标 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{本模块不负责的内容}
+
+RTT（6.6.2.1）；FLAG/测量组/GCI-4（6.6.2.2）；角度（6.6.3）；坐标算法细节（6.6.4）。
+
+\section{在 SLB 通信流程中的角色}
+
+配置面（初信道）$\rightarrow$ 空口多载波测距（T 以 G 同步/测量帧为基准）$\rightarrow$ CSI 反馈 $\rightarrow$ 复合解距。不经过 FLAG 的 GCI-4 激活。
+
+%======================================================================
+\section{关键参数与强制要求}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{2.6cm}L{5.2cm}L{3.5cm}l}
+\toprule
+\textbf{参数} & \textbf{作用} & \textbf{约束} & \textbf{条款} \\
+\midrule
+a)--l) & 见配置节 & 初信道下发 & 6.6.2.3.2 \\
+$T_3=T_4$ & 回程等待对称 & 端口/波束强制 & 6.6.2.3.1 \\
+前导 00/01 & 初信道/跳频信道 & 强制 & 6.6.2.3.3 \\
+$T_{\mathrm{RF}}$ & 切跳稳定 & $\max(T_{\mathrm{RF},1},T_{\mathrm{RF},2})$ & 6.6.2.3.2 g) \\
+表 18 / $P$ & 部分反馈子载波 & $P\in\{2,4,8\}$ & 6.6.2.3.3 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{6.6.2.3 核心详解}
+%======================================================================
+
+%----------------------------------------------------------------------
+\subsection{6.6.2.3.1 跳频测量方法}
+\label{sec:method}
+%----------------------------------------------------------------------
+
+\subsubsection*{方法目标}
+
+位置标签与位置锚点采用跳频，在多个载波上做信道估计并生成\textbf{双向复合信道}，再将多载波复合结果\textbf{拼接}为等效大带宽 CSI；解算节点据此估计锚点--标签距离。G 配置锚点与标签。
+
+G 使用\textbf{位置测量信号资源指示信息}或 \textbf{XRC 信令}为第一测量信号、第二测量信号配置时频资源。
+
+\subsubsection*{基于天线端口的测距}
+
+\begin{enumerate}[nosep]
+  \item $T_1$：第一设备发基于 $N_{\mathrm{port}}$ 的测距信号；
+  \item $T_2$：第二设备收，测得 $M_{\mathrm{port}}$ 组 CSI（IQ）；
+  \item $T_2+T_3$：第二设备发基于 $M_{\mathrm{port}}$ 的测距信号；
+  \item $T_1+T_4$：第一设备收，测得 $N_{\mathrm{port}}$ 组 CSI；\textbf{$T_3=T_4$}；
+  \item 解算节点对 $N_{\mathrm{port}}\cdot M_{\mathrm{port}}$ 条双向端口信道复合，再解距离。
+\end{enumerate}
+
+CSI 组数等于\textbf{接收端}端口数；复合条数为端口笛卡尔积。
+
+\subsubsection*{基于波束的测距}
+
+\begin{enumerate}[nosep]
+  \item 第一设备从 $T_1$ 起发 $N_{\mathrm{beam}}$ 个波束测距信号；
+  \item 第二设备在 $T_2$ 收，每个测距信号对应 1 组 CSI；
+  \item 隔 $T_3$ 后按\textbf{相同时间顺序}回发，且发送时多天线处理与接收时相同；
+  \item 第一设备隔 $T_4$（$T_3=T_4$）收，各得 1 组 CSI；
+  \item 解算节点对匹配的 $N_{\mathrm{beam}}$ 个双向波束信道复合，再解距离。
+\end{enumerate}
+
+\subsubsection*{本方法块：需要什么 + 先前章节}
+
+\begin{center}
+\small
+\begin{tabular}{|L{3.5cm}|L{4.5cm}|L{5cm}|}
+\hline
+\textbf{需要} & \textbf{用途} & \textbf{先前章节} \\
+\hline
+锚点/标签角色 & 第一/第二设备分工 & \textbf{6.6.1} \\
+\hline
+测距波形（CSI-RS/SRS/PMS） & 生成第一/第二测量信号 & \textbf{6.2.3.9} / \textbf{6.5}（由配置 j) 选定） \\
+\hline
+帧结构与测量符号 & 测距帧落点 & \textbf{6.2.2} \\
+\hline
+GCI 或 XRC 时频指示 & 第一/第二测量信号时频 & \textbf{6.2.4.6.6} / \textbf{第 7 章} \\
+\hline
+CSI 测量量定义 & IQ 语义 & \textbf{6.5.5.6} \\
+\hline
+复合与距离算法 & 双向复合、解 $D$ & \textbf{附录 L}；实现可插拔 \\
+\hline
+\end{tabular}
+\end{center}
+
+\textbf{产出}：单载波两端 CSI；解算阶段得到该载波双向复合 CSI 与距离贡献（跳频时多载波在流程/反馈后再拼接）。
+
+%----------------------------------------------------------------------
+\subsection{6.6.2.3.2 跳频测量配置}
+\label{sec:config}
+%----------------------------------------------------------------------
+
+\subsubsection*{配置过程}
+
+\begin{enumerate}[nosep]
+  \item G 配置位置锚点与位置标签；
+  \item 在\textbf{初始工作信道}：G/T 互发定位能力查询与 T 节点定位能力反馈；
+  \item G 根据双方跳频能力，下发\textbf{位置测量信号配置消息}，写入 a)--l)。
+\end{enumerate}
+
+\subsubsection*{配置参数 a)--l) 作用}
+
+\begin{center}
+\small
+\begin{tabular}{|c|L{2.8cm}|L{9cm}|}
+\hline
+\textbf{项} & \textbf{参数} & \textbf{作用} \\
+\hline
+a) & 跳频载波信道号 & 标识本跳基础载波；多载波时用最低频信道号代表整组 \\
+\hline
+b) & PMS 带宽 & 每跳测距带宽；各跳基础载波（组）允许重叠 \\
+\hline
+c) & 跳频图案 & 初始信道 + $\ge 1$ 跳频信道的切换顺序 \\
+\hline
+d) & 端口/波束/重复 & 对接测量方法中的 $N_{\mathrm{port}}/M_{\mathrm{port}}$ 或 $N_{\mathrm{beam}}$ \\
+\hline
+e) & 无线帧结构 & 配比、起始、长度 \\
+\hline
+f) & 测量符号资源 & 跳频信道：全 G 或全 T；初信道还可跟当前 TTI/超帧 \\
+\hline
+g) & $T_{\mathrm{RF}}$ & 切跳后射频稳定等待；取 $\max(T_{\mathrm{RF},1},T_{\mathrm{RF},2})$ \\
+\hline
+h) & 连续/非连续 & 非连续时启用 LBT \\
+\hline
+i) & LBT 最大窗口期 & 超时强制下一跳（G 未占用 / T 未检到 G） \\
+\hline
+j) & 生成方式 & CSI-RS / SRS / PMS 三选一 \\
+\hline
+k) & 分组参数 $P$ & 部分反馈子载波抽样粒度 \\
+\hline
+l) & CSI 测量模式 & 全符号平均，或第 $k$ 个测距符号 \\
+\hline
+\end{tabular}
+\end{center}
+
+\subsubsection*{本配置块：需要什么 + 先前章节}
+
+\begin{center}
+\small
+\begin{tabular}{|L{3.5cm}|L{4.5cm}|L{5cm}|}
+\hline
+\textbf{需要} & \textbf{用途} & \textbf{先前章节} \\
+\hline
+角色已指派 & 配置对象 & \textbf{6.6.1} \\
+\hline
+初始工作信道可用 & 配置发生地点 & 空口驻留；帧结构 \textbf{6.2.2} \\
+\hline
+定位能力查询/反馈消息 & 确认跳频能力 & \textbf{第 7 章} \\
+\hline
+位置测量信号配置消息 & 承载 a)--l) & \textbf{第 7 章}；语义 \textbf{6.6.2.3.2} \\
+\hline
+（其后）GCI/XRC 时频 & 第一/第二测量信号格子 & \textbf{6.2.4.6.6} / \textbf{第 7 章} \\
+\hline
+\end{tabular}
+\end{center}
+
+\textbf{产出}：本地跳频上下文（图案、$T_{\mathrm{RF}}$、LBT、$P$、生成方式等）。
+
+%----------------------------------------------------------------------
+\subsection{6.6.2.3.3 跳频测量流程}
+\label{sec:flow}
+%----------------------------------------------------------------------
+
+前置条件：\textbf{6.6.2.3.2} 已在初始工作信道完成定位能力交互，并下发位置测量信号配置消息 a)--l)；第一/第二测量信号时频已由 GCI 或 XRC 指示（\textbf{6.6.2.3.1} 末段）。本节按标准四步展开，每步给出：处理子步骤、输入依赖、配置用法、产出。
+
+\begin{center}
+\small
+\begin{tabular}{|c|L{3.2cm}|L{8.5cm}|}
+\hline
+\textbf{步骤} & \textbf{阶段} & \textbf{主行为} \\
+\hline
+1 & 取配置 & 初始工作信道接收/保存 a)--l)；G 前导版本域 $=\texttt{00}$ \\
+\hline
+2 & 初信道测量 & 图案[0] 双向测量 $\rightarrow$ 缓存 CSI$_0$ $\rightarrow$ 等 $T_{\mathrm{RF}}$ $\rightarrow$ 切图案[1] \\
+\hline
+3 & 跳频逐测 & 对图案[1..N]：稳定准备 $\rightarrow$（非连续则 LBT）$\rightarrow$ 前导 01 $\rightarrow$ 测量 $\rightarrow$ 切下一跳 \\
+\hline
+4 & 回传解算 & 末跳测完回初始信道；反馈各跳 CSI；解算双向复合并拼接估距 \\
+\hline
+\end{tabular}
+\end{center}
+
+%----------------------------------------------------------------------
+\subsubsection*{步骤 1：初始工作信道获取跳频配置}
+%----------------------------------------------------------------------
+
+\textbf{标准要点}：位置标签与位置锚点在初始工作信道获取跳频配置；G 在初始工作信道发送前导信息时，版本信息域应置为 $\texttt{00}$。
+
+\paragraph{处理子步骤}
+\begin{enumerate}[leftmargin=2em,nosep]
+  \item 锚点、标签停留在图案指示的\textbf{初始工作信道}（配置 c) 第 0 项）；
+  \item 接收并校验\textbf{位置测量信号配置消息}，将 a)--l) 写入本地跳频上下文；
+  \item 解析 GCI/XRC 给出的第一/第二测量信号时频资源；若配置多锚点位图，写入本节点发/收占用；
+  \item 若 G 在本信道发送前导（SAB + 同步信息）：强制版本信息域 $=\texttt{00}$，标识初始工作信道语境；T/锚点据此完成粗同步与测量准备；
+  \item 进入``可测''状态：图案索引 $=0$，CSI 缓存清空。
+\end{enumerate}
+
+\begin{center}
+\small
+\begin{tabular}{|L{3.5cm}|L{4.5cm}|L{5cm}|}
+\hline
+\textbf{需要} & \textbf{用途} & \textbf{先前章节} \\
+\hline
+定位能力查询/反馈 & 确认双方具备跳频复合能力（配置前置） & \textbf{第 7 章}；\textbf{6.6.2.3.2} \\
+\hline
+位置测量信号配置 a)--l) & 写入本地跳频上下文 & \textbf{6.6.2.3.2} \\
+\hline
+前导（SAB/同步信息），版本域 00 & 初信道粗同步与语境标识 & \textbf{6.2.3}；\textbf{6.2.4.2}；本条 \\
+\hline
+GCI/XRC 时频指示 & 第一/第二测量信号发收格子 & \textbf{6.2.4.6.6} / \textbf{第 7 章} \\
+\hline
+多锚点位图（若有） & 本节点发/收时频占用 & 本条末；\textbf{第 7 章} \\
+\hline
+\end{tabular}
+\end{center}
+
+\paragraph{配置 a)--l) 在本步的用法}
+\begin{center}
+\small
+\begin{tabular}{|c|L{3.2cm}|L{9cm}|}
+\hline
+\textbf{项} & \textbf{参数} & \textbf{本步动作} \\
+\hline
+a)--l) & 全部配置项 & \textbf{仅保存}，不在本步执行互发测距帧 \\
+\hline
+c) & 跳频图案 & 锁定初始信道 $=$ 图案[0]；记录后续跳频信道序列 \\
+\hline
+g)/h)/i)/k) & $T_{\mathrm{RF}}$、发送模式、LBT、$P$ & 写入，供步骤 3/4 分支使用 \\
+\hline
+\end{tabular}
+\end{center}
+
+\textbf{产出}：本地跳频上下文就绪（图案、$T_{\mathrm{RF}}$、LBT、$P$、生成方式、CSI 模式、时频格子、位图）；图案索引指向初始信道。尚未缓存业务 CSI。
+
+%----------------------------------------------------------------------
+\subsubsection*{步骤 2：初始工作信道测量交互，再切第二信道}
+%----------------------------------------------------------------------
+
+\textbf{标准要点}：在初始工作信道执行测量交互；结束后按预先确定的跳频图样跳至第二个信道（组）。步骤 2/3 中所有 T 节点以 G 发送的同步信号或测量帧为同步基准。
+
+\paragraph{处理子步骤}
+\begin{enumerate}[leftmargin=2em,nosep]
+  \item \textbf{锁定信道}：工作在图案[0]（初始工作信道），载波标识取 a)，带宽取 b)；
+  \item \textbf{同步基准}：T 以 G 的同步信号或测量帧对齐定时；若仍发前导，版本域保持 $\texttt{00}$；
+  \item \textbf{测量帧个数}：第一位置节点发送一个或多个连续测量帧，第二位置节点发送一个或多个连续测量帧；连续个数由 XRC 或前导指示；
+  \item \textbf{执行双向测量单元}：按 \textbf{6.6.2.3.1}（端口或波束）与 d)/j)/l) 互发互收；满足 $T_3=T_4$；
+  \item \textbf{帧结构规则（初信道专用）}：测量帧可采用当前超帧/TTI 正在采用的无线帧结构；G 测量帧可为全部 G 测量符号构成的无线帧，T 测量帧可为全部 T 测量符号构成的无线帧（配置 e)/f)）；
+  \item \textbf{符号承载}：测量帧内每个测量符号承载测量信息，供对侧计算本基础载波（组）CSI；
+  \item \textbf{本地缓存}：按 l) 聚合后得到 CSI$_0$，附带 a) 载波信道号；
+  \item \textbf{切跳准备}：等待 $\ge T_{\mathrm{RF}}$（g)，已取双方较大值），按图案跳至第二个信道（组）（图案[1]）。
+\end{enumerate}
+
+\begin{center}
+\small
+\begin{tabular}{|L{3.5cm}|L{4.5cm}|L{5cm}|}
+\hline
+\textbf{需要} & \textbf{用途} & \textbf{先前章节} \\
+\hline
+测量方法（端口/波束） & 本跳互发与估 CSI & \textbf{6.6.2.3.1} \\
+\hline
+c)[0]、a)/b) & 锁定初信道与载波/带宽 & \textbf{6.6.2.3.2} \\
+\hline
+d)/j)/l) & 空间维数、波形生成、CSI 聚合 & \textbf{6.6.2.3.2} \\
+\hline
+e)/f) 初信道规则 & 跟超帧/TTI 或全 G/全 T & \textbf{6.2.2} + \textbf{6.6.2.3.2} \\
+\hline
+G 同步信号或测量帧 & T 同步基准 & \textbf{6.2.3} \\
+\hline
+连续测量帧个数 & 各方发几个连续测量帧 & XRC/前导（\textbf{第 7 章}/\textbf{6.2.3}） \\
+\hline
+GCI/XRC 时频 & 第一/第二测量信号格子 & \textbf{6.2.4.6.6} / \textbf{第 7 章} \\
+\hline
+$T_{\mathrm{RF}}$、图案 c) & 测完切第二信道 & \textbf{6.6.2.3.2} g)c) \\
+\hline
+\end{tabular}
+\end{center}
+
+\textbf{产出}：CSI$_0$ 已缓存；射频切向图案[1]；图案索引 $=1$。
+
+%----------------------------------------------------------------------
+\subsubsection*{步骤 3：跳频工作信道逐跳测量}
+%----------------------------------------------------------------------
+
+\textbf{标准要点}：按跳频参数切至第二个信道并再次执行测量交互，之后按图样跳下一信道。须按配置的跳频稳定时长在下一信道做好发/收准备。若该信道需非连续发送，则持续空闲信道评估，直到接入信道发送前导（SAB 和同步信息），或 LBT 时长达到 G 配置的 LBT 最大窗口期时按图样跳往下一信道。G 在跳频工作信道发送前导时，版本信息域置为 $\texttt{01}$，指示跳频信道上发送位置测量帧。
+
+\paragraph{单跳处理子步骤}（对图案索引 $i=1,2,\ldots,N$ 循环）
+\begin{enumerate}[leftmargin=2em,nosep]
+  \item \textbf{切频与稳定}：切入图案[$i$] 对应基础载波（组）；等待 $\ge T_{\mathrm{RF}}$，使收发机在本信道做好发送/接收准备；
+  \item \textbf{发送模式分支}（配置 h)）：
+  \begin{itemize}[nosep]
+    \item \textbf{连续发送}：按定时直接进入本跳测量交互；
+    \item \textbf{非连续发送}：持续空闲信道评估（LBT）——
+      \begin{itemize}[nosep]
+        \item 评估成功、接入信道后：G 发送前导（SAB + 同步信息），版本信息域强制 $=\texttt{01}$；
+        \item 评估时长达到 i) LBT 最大窗口期仍未接入：本跳放弃测量，按图案直接跳往下一信道（防卡死）；
+      \end{itemize}
+  \end{itemize}
+  \item \textbf{同步基准}：T 仍以 G 同步信号或测量帧为基准；
+  \item \textbf{测量交互}：同步骤 2 的双向测量单元（连续测量帧个数仍由 XRC/前导指示）；缓存 CSI$_i$（附 a) 信道号）；
+  \item \textbf{帧结构规则（跳频信道专用）}：测量帧支持一般循环前缀与边界循环前缀配置下的全部无线帧结构；测距帧为全 G 或全 T 测量符号（配置 e)/f)）；
+  \item \textbf{切下一跳}：若 $i<N$，等待 $T_{\mathrm{RF}}$ 后切图案[$i{+}1$]；若 $i=N$，进入步骤 4。
+\end{enumerate}
+
+\begin{center}
+\small
+\begin{tabular}{|L{3.5cm}|L{4.5cm}|L{5cm}|}
+\hline
+\textbf{需要} & \textbf{用途} & \textbf{先前章节} \\
+\hline
+图案 c)[1..N]、a)/b) & 当前/下一跳载波与带宽 & \textbf{6.6.2.3.2} \\
+\hline
+$T_{\mathrm{RF}}$ & 每跳切频后发收准备 & \textbf{6.6.2.3.2} g) \\
+\hline
+h)/i) & 连续/非连续分支；LBT 超时换跳 & \textbf{6.6.2.3.2} \\
+\hline
+前导版本域 01 + SAB/同步 & 标识跳频信道位置测量帧并再同步 & \textbf{6.2.3}；\textbf{6.2.4.2}；本条 \\
+\hline
+e)/f) 跳频信道规则 & 一般/边界 CP；全 G/全 T & \textbf{6.2.2} + \textbf{6.6.2.3.2} \\
+\hline
+测量方法 + d)/j)/l) & 本跳测量单元与 CSI 聚合 & \textbf{6.6.2.3.1}，\textbf{6.6.2.3.2} \\
+\hline
+G 同步信号或测量帧 & T 同步基准 & \textbf{6.2.3} \\
+\hline
+连续测量帧个数 & 各方连续测量帧数 & XRC/前导 \\
+\hline
+\end{tabular}
+\end{center}
+
+\paragraph{步骤 3 状态机（实现视角）}
+\begin{center}
+\small
+\begin{tabular}{|L{2.8cm}|L{5.5cm}|L{4.5cm}|}
+\hline
+\textbf{状态} & \textbf{进入条件} & \textbf{退出/下一状态} \\
+\hline
+RF\_SETTLE & 图案索引更新后 & 等待 $\ge T_{\mathrm{RF}}$ $\rightarrow$ ACCESS \\
+\hline
+ACCESS & 连续模式 / LBT 成功 & 发前导(01) $\rightarrow$ MEASURE \\
+\hline
+ACCESS\_FAIL & 非连续且达 LBT 最大窗口 & 跳过本跳 CSI $\rightarrow$ 下一跳 RF\_SETTLE 或 DONE \\
+\hline
+MEASURE & 前导完成或连续定时到达 & 双向测量 $\rightarrow$ 缓存 CSI$_i$ $\rightarrow$ NEXT \\
+\hline
+NEXT & 本跳结束 & $i{+}1$；若未完 $\rightarrow$ RF\_SETTLE；否则 $\rightarrow$ 步骤 4 \\
+\hline
+\end{tabular}
+\end{center}
+
+\textbf{产出}：CSI$_1,\ldots,$CSI$_N$（LBT 失败的跳可缺省/标记无效）；末跳完成后准备回初始信道。
+
+%----------------------------------------------------------------------
+\subsubsection*{步骤 4：回初始信道并反馈 CSI}
+%----------------------------------------------------------------------
+
+\textbf{标准要点}：在最后一个信道完成测距交互后，切换至初始信道；将每个信道上测量的 CSI 反馈至 G。解算节点根据第一位置节点确定的第一 CSI 与第二位置节点确定的第二 CSI，确定对应信道的双向复合 CSI。反馈承载于位置测量信号测量反馈消息；细则见下一节。
+
+\paragraph{处理子步骤}
+\begin{enumerate}[leftmargin=2em,nosep]
+  \item 末跳测量交互结束后，等待 $\ge T_{\mathrm{RF}}$，按图案切回\textbf{初始工作信道}；
+  \item 第一、第二位置节点分别整理本端各跳 CSI 缓存（按 a) 载波信道号索引）；
+  \item 使用\textbf{位置测量信号测量反馈消息}将各信道 CSI 反馈至 G（或解算节点）；反馈方式为全反馈或部分反馈（部分反馈用 k) 的 $P$，见 \ref{sec:feedback}）；CSI 测量量定义见 \textbf{6.5.5.6}；
+  \item 解算节点对每一基础载波：取双方 CSI 做双向复合（附录 L）；再按载波信道号跨载波拼接为等效大带宽 CSI，估计锚点--标签距离。
+\end{enumerate}
+
+\begin{center}
+\small
+\begin{tabular}{|L{3.5cm}|L{4.5cm}|L{5cm}|}
+\hline
+\textbf{需要} & \textbf{用途} & \textbf{先前章节} \\
+\hline
+各跳 CSI 缓存、图案、$T_{\mathrm{RF}}$ & 回跳与携带测量结果 & 步骤 2--3；\textbf{6.6.2.3.2} \\
+\hline
+位置测量信号测量反馈消息 & 承载 CSI PDU & \textbf{第 7 章} \\
+\hline
+反馈方式（全/部分）与 $P$ & 选子载波集合 & \ref{sec:feedback}；配置 k)；\textbf{6.5.5.6} \\
+\hline
+双方 CSI + 复合/拼接算法 & 双向复合 CSI $\rightarrow$ 距离 & \textbf{6.6.2.3.1}；附录 L \\
+\hline
+\end{tabular}
+\end{center}
+
+\textbf{产出}：测量反馈 PDU；解算节点得到各载波双向复合 CSI 及距离估计（可交 \textbf{6.6.4} 解坐标）。
+
+%----------------------------------------------------------------------
+\subsubsection*{测量交互共性规则（步骤 2 与步骤 3）}
+%----------------------------------------------------------------------
+
+\begin{itemize}[nosep]
+  \item \textbf{同步基准}：测量交互中所有 T 节点以 G 节点发送的同步信号或测量帧作为同步基准信号；
+  \item \textbf{连续测量帧}：每次测量交互中，第一位置节点发送一个或多个连续测量帧，第二位置节点发送一个或多个连续测量帧；个数由 XRC 信令或前导信息指示；
+  \item \textbf{初始工作信道帧}：可采用初始工作信道上超帧或 TTI 正在采用的无线帧结构；G 测量帧可为全部由 G 测量符号构成的无线帧，T 测量帧可为全部由 T 测量符号构成的无线帧；
+  \item \textbf{跳频信道帧}：测量帧支持一般循环前缀配置与边界循环前缀配置下的所有无线帧结构；
+  \item \textbf{符号内容}：基于双向复合信道测距时，测量帧内每个测量符号承载测量信息，供对侧计算相应基础载波对应信道（组）的 CSI。
+\end{itemize}
+
+%----------------------------------------------------------------------
+\subsubsection*{四步 $\times$ a)--l) 作用矩阵}
+%----------------------------------------------------------------------
+
+\begin{center}
+\small
+\begin{tabular}{|c|L{2.6cm}|c|c|c|c|}
+\hline
+\textbf{项} & \textbf{名称} & \textbf{步骤1} & \textbf{步骤2} & \textbf{步骤3} & \textbf{步骤4} \\
+\hline
+a) & 载波信道号 & 保存 & 用 & 用 & 反馈索引 \\
+\hline
+b) & PMS 带宽 & 保存 & 用 & 用 & --- \\
+\hline
+c) & 跳频图案 & 保存 & 初信道/切跳 & 逐跳驱动 & 回初始 \\
+\hline
+d) & 端口/波束/重复 & 保存 & 测量单元 & 测量单元 & --- \\
+\hline
+e) & 无线帧结构 & 保存 & 用 & 用 & --- \\
+\hline
+f) & 测量符号资源 & 保存 & 初信道规则 & 跳频信道规则 & --- \\
+\hline
+g) & $T_{\mathrm{RF}}$ & 保存 & 切跳等待 & 每跳稳定/切跳 & 回跳等待 \\
+\hline
+h) & 连续/非连续 & 保存 & --- & 选分支 & --- \\
+\hline
+i) & LBT 最大窗口 & 保存 & --- & 超时换跳 & --- \\
+\hline
+j) & 生成方式 & 保存 & 发波形 & 发波形 & --- \\
+\hline
+k) & 分组参数 $P$ & 保存 & --- & --- & 部分反馈 \\
+\hline
+l) & CSI 测量模式 & 保存 & 采 CSI & 采 CSI & 上报已采结果 \\
+\hline
+\end{tabular}
+\end{center}
+
+%----------------------------------------------------------------------
+\subsubsection*{多锚点位图}
+%----------------------------------------------------------------------
+
+多锚点跳频测距时，G 向每个位置锚点与位置标签发送位图，指示测量交互中各节点占用的时频资源（含锚点发/标签收，以及标签发/锚点收）。位图通常在步骤 1 写入本地，在步骤 2/3 每次测量交互时执行。
+
+\subsection{CSI 反馈方式}
+\label{sec:feedback}
+%----------------------------------------------------------------------
+
+反馈发生在流程步骤 4 之后（回初始工作信道）。反馈的 CSI 测量量定义见 \textbf{6.5.5.6}；承载于\textbf{位置测量信号测量反馈消息}。
+
+\subsubsection*{全反馈}
+
+\begin{itemize}[nosep]
+  \item 每个基础载波全部有效子载波（160 个）各反馈 1 个 CSI 复数值（IQ）；
+  \item DC 子载波不反馈；
+  \item 每个测过的基础载波均反馈 160 IQ，并附带 20\,MHz 基础载波\textbf{载波信道号}；
+  \item 基础载波之间的间隔子载波不反馈。
+\end{itemize}
+
+\subsubsection*{部分反馈}
+
+\begin{itemize}[nosep]
+  \item 对 160 有效子载波分组反馈；G 在测距协商阶段指示分组参数 $P$（配置 k)）；
+  \item 均匀分组：$P=2,4,8$，每组仅反馈 1 个 IQ；
+  \item $P=2$：\#0$\sim$\#160 中所有偶数子载波；$P=4$：间隔 4 或 2；$P=8$：间隔 8 或 6；
+  \item 均匀反馈：各基础载波 $P$ 相同；非均匀反馈：部分载波用 $P$、部分用 $Q$ 且 $P\neq Q$。
+\end{itemize}
+
+\noindent\textbf{表 18\quad CSI 报告消息（20\,MHz 基础载波）}（T/XS 10001-2025）
+
+\begin{center}
+\small
+\begin{tabular}{|c|c|p{9.2cm}|}
+\hline
+字段 & 字段 & 子载波编号 \\
+\hline
+$P=2$ & 载波信道编号 &
+\#0，\#2，\#4，\#6，\#8，$\ldots$，\#76，\#78，\#82，\#84，$\ldots$，\#158，\#160 \\
+\hline
+$P=4$ & 载波信道编号 &
+\#0，\#4，\#8，\#12，\#16，$\ldots$，\#76，\#78，\#82，\#84，\#88，$\ldots$，\#156，\#160 \\
+\hline
+$P=8$ & 载波信道编号 &
+\#0，\#8，\#16，\#24，$\ldots$，\#72，\#78，\#82，\#88，\#96，$\ldots$，\#152，\#160 \\
+\hline
+\end{tabular}
+\end{center}
+
+\subsubsection*{反馈后解算}
+
+解算节点根据第一、第二位置节点 CSI 确定对应信道的双向复合 CSI；多载波拼接为等效大带宽后估计距离（复合相位关系见\textbf{附录 L}）。
+
+\begin{center}
+\small
+\begin{tabular}{|L{3.5cm}|L{4.5cm}|L{5cm}|}
+\hline
+\textbf{需要} & \textbf{用途} & \textbf{先前章节} \\
+\hline
+各跳双方 CSI + 载波信道号 & 对齐与复合 & 流程步骤 2--4 \\
+\hline
+$P$ / 表 18 或全反馈规则 & 解析反馈 IE & \textbf{6.6.2.3.2} k)；本表 18 \\
+\hline
+CSI 测量量定义 & IQ 语义 & \textbf{6.5.5.6} \\
+\hline
+测量反馈消息 & 传输载体 & \textbf{第 7 章} \\
+\hline
+双向复合 / 拼接 / 解距 & 输出 $D$ & \textbf{6.6.2.3.1}；\textbf{附录 L}；（可选）\textbf{6.6.4} \\
+\hline
+\end{tabular}
+\end{center}
+
+%======================================================================
+\section{数据类型、长度与维度}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{对象} & \textbf{长度/维数} & \textbf{上下文} & \textbf{条款} \\
+\midrule
+端口双向信道 & $N_{\mathrm{port}}\times M_{\mathrm{port}}$ & 测量方法 & 6.6.2.3.1 \\
+波束双向信道 & $N_{\mathrm{beam}}$ & 须匹配 & 6.6.2.3.1 \\
+全反馈 CSI & 160 IQ/基础载波 & 无 DC & 反馈方式 \\
+部分反馈 CSI & 约 $160/P$ IQ & 表 18 & 反馈方式 \\
+前导版本域 & 00 / 01 & 初/跳频信道 & 6.6.2.3.3 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{时序关系与触发条件}
+%======================================================================
+
+\begin{itemize}[nosep]
+  \item 配置在初始工作信道、能力交互之后；
+  \item 开测不依赖 GCI 第四格式；
+  \item 切跳：测完且 $\ge T_{\mathrm{RF}}$，或 LBT 达最大窗口期；
+  \item 反馈：图案测完并回初始信道后；
+  \item 解算：收齐双方各载波 CSI 后。
+\end{itemize}
+
+%======================================================================
+\section{处理步骤}
+%======================================================================
+
+\begin{enumerate}[nosep]
+  \item \textbf{Step 1（配置）}：能力交互；下发 a)--l)；GCI/XRC 配时频；前导 00；
+  \item \textbf{Step 2（方法@初信道）}：按 6.6.2.3.1 测量；缓存 CSI$_0$；等 $T_{\mathrm{RF}}$ 切跳；
+  \item \textbf{Step 3（方法@跳频）}：前导 01 / LBT；逐跳测量；缓存 CSI$_i$；
+  \item \textbf{Step 4（反馈）}：回初始信道；全反馈或表 18 部分反馈；
+  \item \textbf{Step 5（解算）}：逐载波双向复合 $\rightarrow$ 拼接 $\rightarrow$ 距离 $D$。
+\end{enumerate}
+
+%======================================================================
+\section{约束与实现要点}
+%======================================================================
+
+\begin{enumerate}[nosep]
+  \item \textbf{【条文顺序】}：实现依赖``方法定义 $\rightarrow$ 配置下发 $\rightarrow$ 流程执行 $\rightarrow$ 反馈解算''，与标准 6.6.2.3.1--3 一致。
+  \item \textbf{【路径独立】}：不依赖测量组与 GCI-4（对比 6.6.2.2）。
+  \item \textbf{【同步基准】}：流程步骤 2/3 中 T 以 G 同步信号或测量帧为基准（\textbf{6.2.3}）。
+  \item \textbf{【前导版本域】}：初信道 00，跳频信道 01。
+  \item \textbf{【$T_{\mathrm{RF}}$ / $T_3=T_4$】}：切跳取双方稳定时长最大值；测量单元回程间隔相等。
+  \item \textbf{【波束匹配】}：回发顺序与多天线处理与接收时一致。
+  \item \textbf{【LBT】}：非连续时达窗口期必须换跳。
+  \item \textbf{【CSI 反馈】}：全反馈无 DC；部分反馈按表 18；$P$ 在协商阶段指示。
+  \item \textbf{【信道号】}：配置与反馈用最低频基础载波信道号对齐拼接。
+\end{enumerate}
+
+%======================================================================
+\section{与标准其他章节的衔接}
+%======================================================================
+
+\begin{itemize}[nosep]
+  \item \textbf{6.6.1}：角色与资源配置；
+  \item \textbf{6.2.2 / 6.2.3 / 6.2.3.9}：帧结构、同步/SAB、PMS；
+  \item \textbf{6.2.4.6.6 / 第 7 章}：GCI/XRC、能力与配置/反馈消息；
+  \item \textbf{6.5.5.6 / 附录 L}：CSI 定义与双向复合；
+  \item \textbf{6.6.2.1 / 6.6.2.2}：并列测距路径；
+  \item \textbf{6.6.4}：距离到坐标。
+\end{itemize}
+
+\vfill
+\begin{center}
+\small\textcolor{gray}{字段级定义与完整参数以 T/XS 10001-2025 第 6 章及 6.6.2.3 为准；本文档按测量方法、测量配置、测量流程、反馈方式顺序提供工程解读与先前章节依赖，供 SLB 实现与联调参考。}
+\end{center}
+
+\end{document}
