@@ -1,0 +1,596 @@
+% !TEX program = xelatex
+\documentclass[11pt,a4paper]{ctexart}
+
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{listings}
+
+\geometry{left=2.2cm,right=2.2cm,top=2.2cm,bottom=2.2cm}
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue}
+
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newcolumntype{C}[1]{>{\centering\arraybackslash}p{#1}}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  columns=fullflexible,
+  keepspaces=true,
+  frame=single,
+  backgroundcolor=\color{gray!8},
+  xleftmargin=0.5em,
+  xrightmargin=0.5em
+}
+
+\title{%
+  \textbf{SLB 物理层通用功能（6.5）}\\[0.35em]
+  \Large C 库对外暴露接口说明书\\[0.25em]
+  \large \texttt{nl\_phy} API \textbullet\ 参数约定 \textbullet\ 错误码
+}
+\author{%
+  代码路径：\texttt{SLB-physical-layer-tech-docs/AI代码/6.5物理层通用功能}\\
+  依据 T/XS 10001-2025 第 6.5 节（6.5.1\textasciitilde 6.5.9）
+}
+\date{2026 年 7 月 23 日}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+%======================================================================
+\section{文档说明}
+%======================================================================
+
+\subsection{范围}
+
+本文档整理当前已完成的 NearLink / SLB 物理层通用功能 C 库对外需暴露的接口，覆盖：
+
+\begin{itemize}[nosep]
+  \item 6.5.1 循环冗余校验（CRC）
+  \item 6.5.2 伪随机 Gold 序列
+  \item 6.5.3 伪随机 QPSK 参考信号
+  \item 6.5.4 功率控制
+  \item 6.5.5 测量量（通信 + 位置）
+  \item 6.5.6 调制（QPSK\textasciitilde 4096QAM）
+  \item 6.5.7 比特加扰
+  \item 6.5.8 SC-FDMA DFT 预编码
+  \item 6.5.9 Zadoff--Chu 序列与组跳
+\end{itemize}
+
+统一入口：\texttt{\#include "nl\_phy.h"}。
+
+\subsection{公共约定}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{ll}
+\toprule
+\textbf{项} & \textbf{约定} \\
+\midrule
+比特顺序 & 数组下标 0 为 LSB / 空口先发位（与标准 6.1 一致） \\
+复数类型 & \texttt{nl\_cplx\_t \{ float re; float im; \}} \\
+返回值 & \texttt{NL\_PHY\_OK(=0)} 成功；负数为错误 \\
+缓冲容量 & 调用方分配；容量不足返回 \texttt{NL\_PHY\_ERR\_BUF} \\
+线程模型 & 无全局可变业务状态；输出缓冲由调用方提供 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{错误码（\texttt{nl\_phy\_types.h}）}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{宏} & \textbf{值} & \textbf{含义} \\
+\midrule
+\texttt{NL\_PHY\_OK} & 0 & 成功 \\
+\texttt{NL\_PHY\_ERR\_PARAM} & $-1$ & 空指针 / 非法参数 / 长度不整除等 \\
+\texttt{NL\_PHY\_ERR\_BUF} & $-2$ & 输出缓冲不足 \\
+\texttt{NL\_PHY\_ERR\_MEAS} / \texttt{NL\_PHY\_ERR\_MODE} & $-3$ & 测量分母非法 / 模式不支持 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{源文件与协议节映射}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{头文件} & \textbf{源文件} & \textbf{协议节} \\
+\midrule
+\texttt{nl\_phy\_types.h} & --- & 公共类型 \\
+\texttt{nl\_phy\_common.h} & \texttt{nl\_phy\_common.c} & 6.5.1 / 6.5.2 / 6.5.3 \\
+\texttt{nl\_phy\_pwr\_meas.h} & \texttt{nl\_phy\_pwr\_meas.c} & 6.5.4 / 6.5.5 \\
+\texttt{nl\_phy\_mod.h} & \texttt{nl\_phy\_mod.c} & 6.5.6 \\
+\texttt{nl\_phy\_scram.h} & \texttt{nl\_phy\_scram.c} & 6.5.7 \\
+\texttt{nl\_phy\_scfdma.h} & \texttt{nl\_phy\_scfdma.c} & 6.5.8 \\
+\texttt{nl\_phy\_zc.h} & \texttt{nl\_phy\_zc.c} & 6.5.9 \\
+\texttt{nl\_phy.h} & --- & 聚合入口 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\newpage
+%======================================================================
+\section{6.5.1 循环冗余校验（CRC）}
+%======================================================================
+
+\subsection{枚举}
+
+\begin{lstlisting}
+typedef enum {
+    NL_CRC24A = 0,  /* 多项式 0x864CFB, L=24 */
+    NL_CRC24B,      /* 多项式 0x800063, L=24 */
+    NL_CRC16,       /* 多项式 0x1021,   L=16 */
+    NL_CRC8,        /* 多项式 0x9B,     L=8  */
+    NL_CRC6         /* 多项式 0x21,     L=6  */
+} nl_crc_poly_t;
+\end{lstlisting}
+
+\subsection{配置结构体}
+
+\begin{longtable}{@{}L{3.2cm}L{2.8cm}L{8.5cm}@{}}
+\toprule
+\textbf{字段} & \textbf{类型} & \textbf{含义} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{字段} & \textbf{类型} & \textbf{含义} \\
+\midrule
+\endhead
+\multicolumn{3}{l}{\textit{nl\_crc\_encode\_cfg\_t（编码）}} \\
+\texttt{a} & \texttt{const uint8\_t *} & 信息比特，$a_0\ldots a_{A-1}$，每元素 0/1 \\
+\texttt{A} & \texttt{uint32\_t} & 信息比特长度 \\
+\texttt{poly} & \texttt{nl\_crc\_poly\_t} & 多项式类型 \\
+\texttt{mask} & \texttt{const uint8\_t *} & 24 bit 掩码；\texttt{NULL}=无掩码（用于 GCI/HARQ 等） \\
+\texttt{b} & \texttt{uint8\_t *} & 输出缓冲：信息 + 校验（可含掩码后校验） \\
+\texttt{b\_cap} & \texttt{uint32\_t} & 输出容量，须 $\ge A+L$ \\
+\midrule
+\multicolumn{3}{l}{\textit{nl\_crc\_check\_cfg\_t（校验）}} \\
+\texttt{b} & \texttt{const uint8\_t *} & 收端比特块（含 CRC） \\
+\texttt{B} & \texttt{uint32\_t} & 总长度 $A+L$ \\
+\texttt{poly} & \texttt{nl\_crc\_poly\_t} & 多项式类型 \\
+\texttt{mask} & \texttt{const uint8\_t *} & 与编码侧相同掩码约定 \\
+\texttt{pass} & \texttt{uint8\_t *} & 输出：非 0 表示通过 \\
+\bottomrule
+\end{longtable}
+
+\subsection{函数接口}
+
+\begin{longtable}{@{}L{4.2cm}L{4.5cm}L{5.8cm}@{}}
+\toprule
+\textbf{函数} & \textbf{参数} & \textbf{说明} \\
+\midrule
+\endfirsthead
+\toprule\textbf{函数}&\textbf{参数}&\textbf{说明}\\\midrule\endhead
+\texttt{nl\_crc\_get\_len} & \texttt{poly} & 返回校验比特长度 $L\in\{6,8,16,24\}$ \\
+\texttt{nl\_crc\_encode} & \texttt{const nl\_crc\_encode\_cfg\_t *cfg} & 编码：$b = a \| \mathrm{CRC}$（可选掩码） \\
+\texttt{nl\_crc\_check} & \texttt{const nl\_crc\_check\_cfg\_t *cfg} & 校验，结果写入 \texttt{*pass} \\
+\bottomrule
+\end{longtable}
+
+\textbf{典型调用方}：6.2.4 控制信息、6.2.5/6.2.6 数据与码块分段。
+
+\newpage
+%======================================================================
+\section{6.5.2 伪随机 Gold 序列}
+%======================================================================
+
+\subsection{配置结构体 \texttt{nl\_pn\_seq\_cfg\_t}}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{字段} & \textbf{类型} & \textbf{含义} \\
+\midrule
+\texttt{c\_init} & \texttt{uint32\_t} & Gold 序列初始化值 \\
+\texttt{M\_PN} & \texttt{uint32\_t} & 需要生成的比特数 \\
+\texttt{c} & \texttt{uint8\_t *} & 输出序列缓冲（每元素 0/1） \\
+\texttt{c\_cap} & \texttt{uint32\_t} & 缓冲容量，$\ge$\texttt{M\_PN} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{函数接口}
+
+\begin{lstlisting}
+int nl_pn_gold_generate(const nl_pn_seq_cfg_t *cfg);
+\end{lstlisting}
+
+\begin{itemize}[nosep]
+  \item \textbf{功能}：生成长度 \texttt{M\_PN} 的 Gold 伪随机比特序列 $c(i)$。
+  \item \textbf{实现要点}：$x_1$ 初值固定，已预计算查表；$x_2$ 由 \texttt{c\_init} 驱动。
+  \item \textbf{调用方}：6.5.3 QPSK RS、6.5.7 加扰、6.5.9 组跳等。
+\end{itemize}
+
+\newpage
+%======================================================================
+\section{6.5.3 伪随机 QPSK 参考信号}
+%======================================================================
+
+\subsection{常量}
+
+\begin{itemize}[nosep]
+  \item \texttt{NL\_QPSK\_N\_SC = 161}：单基础载波子载波数
+  \item \texttt{NL\_QPSK\_DC\_K = 80}：直流子载波索引（不映射）
+\end{itemize}
+
+\subsection{参数结构}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{结构 / 字段} & \textbf{类型} & \textbf{含义} \\
+\midrule
+\multicolumn{3}{l}{\textit{nl\_qpsk\_cinit\_param\_t}} \\
+\texttt{n} & \texttt{uint8\_t} & 无线帧号相关参数 $n$ \\
+\texttt{l} & \texttt{uint8\_t} & 符号号 $l$ \\
+\texttt{N\_ID} & \texttt{uint8\_t} & 物理层标识相关 $N_{\mathrm{ID}}$ \\
+\texttt{N\_CP} & \texttt{uint8\_t} & CP 类型；$0\sim 3$ 对应类型四\textasciitilde 一 \\
+\midrule
+\multicolumn{3}{l}{\textit{nl\_qpsk\_seq\_cfg\_t}} \\
+\texttt{param} & \texttt{nl\_qpsk\_cinit\_param\_t} & $c_{\mathrm{init}}$ 计算参数 \\
+\texttt{r} & \texttt{nl\_cplx\_t *} & 输出 QPSK 序列（建议容量 161） \\
+\texttt{r\_cap} & \texttt{uint32\_t} & 输出容量 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{函数接口}
+
+\begin{longtable}{@{}L{4.6cm}L{5.2cm}L{4.7cm}@{}}
+\toprule
+\textbf{函数} & \textbf{参数} & \textbf{说明} \\
+\midrule
+\endfirsthead
+\toprule\textbf{函数}&\textbf{参数}&\textbf{说明}\\\midrule\endhead
+\texttt{nl\_qpsk\_calc\_cinit} & \texttt{const nl\_qpsk\_cinit\_param\_t *param} & 计算 $c_{\mathrm{init}}$ 并返回 \\
+\texttt{nl\_qpsk\_ref\_generate} & \texttt{const nl\_qpsk\_seq\_cfg\_t *cfg} & 生成 $r_{n,l}(k)$，$k{=}80$ 处为 0 \\
+\texttt{nl\_qpsk\_map\_to\_re} & \texttt{r}, \texttt{a\_kl}, \texttt{k} & 将序列第 $k$ 个符号写入 RE \\
+\bottomrule
+\end{longtable}
+
+\textbf{典型调用方}：6.2.3 中 SRS / CSI-RS / DMRS 等参考信号生成（\textbf{不得}与 6.5.6 业务调制混用）。
+
+\newpage
+%======================================================================
+\section{6.5.4 功率控制}
+%======================================================================
+
+\subsection{$P_0$ 通道类型枚举 \texttt{nl\_po\_type\_e}}
+
+\texttt{NL\_PO\_SRS} / \texttt{NL\_PO\_RACH} / \texttt{NL\_PO\_ACK} / \texttt{NL\_PO\_DATA\_CLASS1} / \texttt{NL\_PO\_DATA\_CLASS2}（供上层选择对应 $P_0$ 配置项）。
+
+\subsection{函数接口}
+
+\begin{longtable}{@{}L{4.0cm}L{6.2cm}L{4.3cm}@{}}
+\toprule
+\textbf{函数} & \textbf{参数} & \textbf{说明} \\
+\midrule
+\endfirsthead
+\toprule\textbf{函数}&\textbf{参数}&\textbf{说明}\\\midrule\endhead
+\texttt{nl\_pwr\_calc\_pathloss}
+  & \texttt{gLinkRefPwr\_dbm}, \texttt{rsrp\_dbm}, \texttt{*pl\_db}
+  & $P_L = P_{\mathrm{ref}} - \mathrm{RSRP}$ \\
+\texttt{nl\_pwr\_calc\_initial}
+  & \texttt{M}, \texttt{P0\_dbm}, \texttt{pl\_db}, \texttt{*p\_dbm}
+  & $P = 10\log_{10} M + P_0 + P_L$ \\
+\texttt{nl\_pwr\_dbm\_to\_linear}
+  & \texttt{p\_dbm}, \texttt{*p\_lin\_mW}
+  & dBm $\rightarrow$ 线性 mW \\
+\texttt{nl\_pwr\_linear\_to\_dbm}
+  & \texttt{p\_lin\_mW}, \texttt{*p\_dbm}
+  & 线性 mW $\rightarrow$ dBm \\
+\texttt{nl\_pwr\_aggregate}
+  & \texttt{p\_lin[]}, \texttt{N}, \texttt{K}, \texttt{pMax\_lin}, \texttt{pK\_lin[]}
+  & 多通道功率聚合并按 $K$ 均分，受 $P_{\max}$ 限制 \\
+\bottomrule
+\end{longtable}
+
+\textbf{参数补充}：\texttt{M} 为占用子载波数；$P_0$ 由上层按通道类型从 XRC 配置读入。
+
+\newpage
+%======================================================================
+\section{6.5.5 测量量}
+%======================================================================
+
+\subsection{通信测量配置结构}
+
+\begin{longtable}{@{}L{3.4cm}L{2.6cm}L{8.5cm}@{}}
+\toprule
+\textbf{结构 / 字段} & \textbf{类型} & \textbf{含义} \\
+\midrule
+\endfirsthead
+\toprule\textbf{结构 / 字段}&\textbf{类型}&\textbf{含义}\\\midrule\endhead
+\multicolumn{3}{l}{\textit{nl\_meas\_rsrp\_cfg\_t}} \\
+\texttt{re\_power} & \texttt{const float *} & FTS 活跃子载波上各 RE 线性功率 (W) \\
+\texttt{n\_re} & \texttt{uint16\_t} & RE 个数 \\
+\texttt{ant\_power} & \texttt{const float *} & 多天线时各天线 RSRP；可为 \texttt{NULL} \\
+\texttt{n\_ant} & \texttt{uint8\_t} & 天线数 \\
+\midrule
+\multicolumn{3}{l}{\textit{nl\_meas\_rssi\_cfg\_t}} \\
+\texttt{sym\_power} & \texttt{const float *} & 符号内各 RE（或预聚合）线性功率 \\
+\texttt{n\_re} & \texttt{uint16\_t} & 个数 \\
+\texttt{ant\_power}/\texttt{n\_ant} & --- & 同 RSRP 多天线约定 \\
+\midrule
+\multicolumn{3}{l}{\textit{nl\_meas\_cbra\_cfg\_t}} \\
+\texttt{sym\_pwr\_dbm} & \texttt{const float *} & 测量窗内各符号/段功率 (dBm) \\
+\texttt{n\_sym} & \texttt{uint32\_t} & 段数 \\
+\texttt{T\_measure\_s} & \texttt{float} & 测量时长 (s) \\
+\texttt{dt\_preamble\_detected} & \texttt{uint8\_t} & 是否检测到 DT 前导 \\
+\texttt{dt\_frame\_duration\_s} & \texttt{float} & 检测到 DT 时使用的帧时长 \\
+\bottomrule
+\end{longtable}
+
+阈值：\texttt{NL\_CBRA\_THRESH\_DT\_DBM = -87}，\texttt{NL\_CBRA\_THRESH\_SYM\_DBM = -62}。
+
+\subsection{通信测量函数}
+
+\begin{longtable}{@{}L{3.6cm}L{6.0cm}L{4.9cm}@{}}
+\toprule
+\textbf{函数} & \textbf{参数} & \textbf{说明} \\
+\midrule
+\endfirsthead
+\toprule\textbf{函数}&\textbf{参数}&\textbf{说明}\\\midrule\endhead
+\texttt{nl\_meas\_rsrp} & \texttt{cfg}, \texttt{*rsrp\_linear} & 线性平均（多天线取最大） \\
+\texttt{nl\_meas\_rssi} & \texttt{cfg}, \texttt{*rssi\_linear} & 同上 \\
+\texttt{nl\_meas\_rsrq} & \texttt{rsrp}, \texttt{rssi}, \texttt{*rsrq} & $\mathrm{RSRQ}=\mathrm{RSRP}/\mathrm{RSSI}$ \\
+\texttt{nl\_meas\_sinr} & \texttt{rsrp}, \texttt{rssi}, \texttt{*sinr} & $\mathrm{SINR}=\mathrm{RSRP}/(\mathrm{RSSI}-\mathrm{RSRP})$ \\
+\texttt{nl\_meas\_cbra} & \texttt{cfg}, \texttt{*cbra} & 信道忙占比 $[0,1]$ \\
+\bottomrule
+\end{longtable}
+
+\subsection{位置测量结构与函数}
+
+\begin{longtable}{@{}L{3.6cm}L{2.8cm}L{8.1cm}@{}}
+\toprule
+\textbf{结构 / 字段} & \textbf{类型} & \textbf{含义} \\
+\midrule
+\endfirsthead
+\toprule\textbf{结构 / 字段}&\textbf{类型}&\textbf{含义}\\\midrule\endhead
+\multicolumn{3}{l}{\textit{nl\_meas\_pms\_csi\_cfg\_t}} \\
+\texttt{freq\_iq} & \texttt{const nl\_cplx\_t *} & 频域 CSI IQ \\
+\texttt{mode} & \texttt{uint8\_t} & 1=全帧平均；2=第 $n$ 个测距符号 \\
+\texttt{n\_rx}/\texttt{n\_tx} & \texttt{uint8\_t} & 收/发天线数 \\
+\texttt{n\_sc} & \texttt{uint16\_t} & 子载波数 \\
+\midrule
+\multicolumn{3}{l}{\textit{nl\_pms\_csi\_t}（输出）} \\
+\texttt{iq\_linear} & \texttt{int16\_t *} & 12-bit 量级线性 IQ 量化（调用方缓冲） \\
+\texttt{rpl\_dbm} & \texttt{int16\_t *} & RPL 参考 (dBm) \\
+\midrule
+\multicolumn{3}{l}{\textit{nl\_pms\_time\_t}} \\
+\texttt{t[6]} & \texttt{double} & $t_1\ldots t_6$ TOA/TOD 时间戳 \\
+\texttt{n\_signals} & \texttt{uint8\_t} & 2 或 3 \\
+\texttt{node\_role} & \texttt{uint8\_t} & 1=第一位置节点；2=第二位置节点 \\
+\midrule
+\multicolumn{3}{l}{\textit{nl\_pms\_timediff\_t}（输出）} \\
+\texttt{T}/\texttt{T1}/\texttt{T2} & \texttt{double} & 两信号时输出 $T$；三信号输出 $T_1,T_2$ \\
+\midrule
+\multicolumn{3}{l}{\textit{nl\_meas\_pms\_aoa\_cfg\_t} / \texttt{nl\_pms\_aoa\_t}} \\
+\texttt{array\_snap} & \texttt{const nl\_cplx\_t *} & 阵列快照 \\
+\texttt{n\_rx}/\texttt{n\_snap} & --- & 天线数 / 快照数 \\
+\texttt{azimuth\_deg} & \texttt{float} & 水平角 $[0,360)$ \\
+\texttt{elevation\_deg} & \texttt{float} & 垂直角（当前实现占位） \\
+\bottomrule
+\end{longtable}
+
+\begin{longtable}{@{}L{4.2cm}L{5.5cm}L{4.8cm}@{}}
+\toprule
+\textbf{函数} & \textbf{参数} & \textbf{说明} \\
+\midrule
+\endfirsthead
+\toprule\textbf{函数}&\textbf{参数}&\textbf{说明}\\\midrule\endhead
+\texttt{nl\_meas\_pms\_csi} & \texttt{cfg}, \texttt{*out} & PMS CSI 量化编码 \\
+\texttt{nl\_meas\_pms\_iq\_dbm} & \texttt{iq\_linear}, \texttt{rpl\_dbm} & IQ+RPL $\rightarrow$ dBm \\
+\texttt{nl\_meas\_pms\_timediff} & \texttt{const nl\_pms\_time\_t *}, \texttt{*out} & 两/三信号时间差 \\
+\texttt{nl\_meas\_pms\_aoa} & \texttt{cfg}, \texttt{*out} & AoA 估计（简化实现） \\
+\bottomrule
+\end{longtable}
+
+\textbf{典型调用方}：6.6 定位流程、MAC 测量上报。
+
+\newpage
+%======================================================================
+\section{6.5.6 调制方式}
+%======================================================================
+
+\subsection{枚举 \texttt{nl\_mod\_type\_e}}
+
+\texttt{NL\_MOD\_QPSK}(2)、\texttt{NL\_MOD\_16QAM}(4)、\texttt{NL\_MOD\_64QAM}(6)、\texttt{NL\_MOD\_256QAM}(8)、\texttt{NL\_MOD\_1024QAM}(10)、\texttt{NL\_MOD\_4096QAM}(12)；括号内为每符号比特数。
+
+\subsection{函数接口}
+
+\begin{longtable}{@{}L{4.4cm}L{5.8cm}L{4.3cm}@{}}
+\toprule
+\textbf{函数} & \textbf{参数} & \textbf{说明} \\
+\midrule
+\endfirsthead
+\toprule\textbf{函数}&\textbf{参数}&\textbf{说明}\\\midrule\endhead
+\texttt{nl\_mod\_bits\_per\_symbol}
+  & \texttt{mod\_type}
+  & 返回每符号比特数；非法返回 0 \\
+\texttt{nl\_mod\_map}
+  & \texttt{bits}, \texttt{N\_bit}, \texttt{mod\_type}, \texttt{symbols}, \texttt{*N\_sym}
+  & 批量映射；要求 $N_{\mathrm{bit}}$ 能被 $m$ 整除 \\
+\texttt{nl\_mod\_qpsk\_one}
+  & \texttt{b0}, \texttt{b1}
+  & 单符号 QPSK \\
+\texttt{nl\_mod\_16qam\_one}
+  & \texttt{const uint8\_t b[4]}
+  & 单符号 16QAM \\
+\texttt{nl\_mod\_64qam\_one}
+  & \texttt{b[6]}
+  & 单符号 64QAM \\
+\texttt{nl\_mod\_256qam\_one}
+  & \texttt{b[8]}
+  & 单符号 256QAM \\
+\texttt{nl\_mod\_1024qam\_one}
+  & \texttt{b[10]}
+  & 单符号 1024QAM \\
+\texttt{nl\_mod\_4096qam\_one}
+  & \texttt{b[12]}
+  & 单符号 4096QAM \\
+\bottomrule
+\end{longtable}
+
+\textbf{约束}：比特按自然序连续消费；$b(2i)$ 先于 $b(2i{+}1)$。参考信号 QPSK 请用 6.5.3，勿调用本模块。
+
+\newpage
+%======================================================================
+\section{6.5.7 比特加扰}
+%======================================================================
+
+\begin{longtable}{@{}L{4.6cm}L{5.6cm}L{4.3cm}@{}}
+\toprule
+\textbf{函数} & \textbf{参数} & \textbf{说明} \\
+\midrule
+\endfirsthead
+\toprule\textbf{函数}&\textbf{参数}&\textbf{说明}\\\midrule\endhead
+\texttt{nl\_scram\_calc\_cinit\_data}
+  & \texttt{n\_f\_low7}, \texttt{n\_g\_pid}
+  & 数据路径 $c_{\mathrm{init}}=n_{f,\mathrm{low7}}\cdot 2^{24}+(n_{g,\mathrm{pid}}\bmod 2^{24})$ \\
+\texttt{nl\_scram\_apply}
+  & \texttt{bits\_in}, \texttt{bits\_out}, \texttt{N\_bit}, \texttt{c\_init}
+  & $\tilde{b}_i = b_i \oplus c(i)$；内部生成 Gold；$N_{\mathrm{bit}}\le 8192$ \\
+\bottomrule
+\end{longtable}
+
+\textbf{典型调用方}：6.2.5 数据 TB（编码后、调制前）。控制信息路径通常不加扰。
+
+\newpage
+%======================================================================
+\section{6.5.8 SC-FDMA 波形生成}
+%======================================================================
+
+\begin{lstlisting}
+int nl_scfdma_precode(const nl_cplx_t *x, nl_cplx_t *y,
+                      uint32_t M_symb, uint16_t M_sc_total);
+\end{lstlisting}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{参数} & \textbf{类型} & \textbf{含义} \\
+\midrule
+\texttt{x} & \texttt{const nl\_cplx\_t *} & 时域调制符号输入，长度 \texttt{M\_symb} \\
+\texttt{y} & \texttt{nl\_cplx\_t *} & DFT 预编码后频域符号输出 \\
+\texttt{M\_symb} & \texttt{uint32\_t} & 符号总数；须能被 \texttt{M\_sc\_total} 整除 \\
+\texttt{M\_sc\_total} & \texttt{uint16\_t} & 每段 DFT 点数（占用子载波数） \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{行为}：将输入按长度 $M_{\mathrm{sc}}$ 分段，对每段做归一化 DFT（系数 $1/\sqrt{M}$）。主要用于 6.3.3 深覆盖等 SC-FDMA 场景。
+
+\newpage
+%======================================================================
+\section{6.5.9 Zadoff--Chu 序列}
+%======================================================================
+
+\begin{longtable}{@{}L{4.2cm}L{5.8cm}L{4.5cm}@{}}
+\toprule
+\textbf{函数} & \textbf{参数} & \textbf{说明} \\
+\midrule
+\endfirsthead
+\toprule\textbf{函数}&\textbf{参数}&\textbf{说明}\\\midrule\endhead
+\texttt{nl\_zc\_largest\_prime\_less}
+  & \texttt{n}
+  & 返回 $<n$ 的最大素数；作 $N_{\mathrm{ZC}}$ \\
+\texttt{nl\_zc\_group\_hop}
+  & \texttt{n\_s}, \texttt{n\_id\_x}, \texttt{*u\_out}
+  & 序列组跳，输出组号 $u\in[0,29]$ \\
+\texttt{nl\_zc\_gen\_m2\_table}
+  & \texttt{u}, \texttt{alpha}, \texttt{seq}, \texttt{M\_rs}
+  & $m{=}2$ 查表生成（$v$ 须为 0） \\
+\texttt{nl\_zc\_gen}
+  & \texttt{u}, \texttt{v}, \texttt{alpha}, \texttt{m}, \texttt{seq}, \texttt{M\_rs}
+  & 通用生成：按 $m$ 选表或 ZC 公式 \\
+\bottomrule
+\end{longtable}
+
+\subsection{\texttt{nl\_zc\_gen} 参数约束}
+
+\begin{itemize}[nosep]
+  \item \texttt{u}：$0\sim 29$
+  \item \texttt{v}：基序列号；$m{=}2$ 时须 $v{=}0$；$m\le 5$ 时 $v$ 受限
+  \item \texttt{alpha}：循环移位相位因子
+  \item \texttt{m}：长度相关模式选择（2 走表；$\ge 4$ 走 ZC）
+  \item \texttt{M\_rs}：序列长度；\texttt{seq} 输出缓冲容量 $\ge$\texttt{M\_rs}
+\end{itemize}
+
+\textbf{典型调用方}：6.2.3.1 FTS/STS 等同步/ZC 类信号。
+
+\newpage
+%======================================================================
+\section{对外暴露接口总表（联调用）}
+%======================================================================
+
+\begin{longtable}{@{}C{1.2cm}L{4.6cm}L{2.2cm}L{6.5cm}@{}}
+\toprule
+\textbf{节} & \textbf{接口} & \textbf{返回} & \textbf{主要入参摘要} \\
+\midrule
+\endfirsthead
+\toprule\textbf{节}&\textbf{接口}&\textbf{返回}&\textbf{主要入参摘要}\\\midrule\endhead
+6.5.1 & \texttt{nl\_crc\_get\_len} & \texttt{uint32\_t} & \texttt{poly} \\
+6.5.1 & \texttt{nl\_crc\_encode} & \texttt{int} & \texttt{nl\_crc\_encode\_cfg\_t *} \\
+6.5.1 & \texttt{nl\_crc\_check} & \texttt{int} & \texttt{nl\_crc\_check\_cfg\_t *} \\
+6.5.2 & \texttt{nl\_pn\_gold\_generate} & \texttt{int} & \texttt{nl\_pn\_seq\_cfg\_t *} \\
+6.5.3 & \texttt{nl\_qpsk\_calc\_cinit} & \texttt{uint32\_t} & \texttt{nl\_qpsk\_cinit\_param\_t *} \\
+6.5.3 & \texttt{nl\_qpsk\_ref\_generate} & \texttt{int} & \texttt{nl\_qpsk\_seq\_cfg\_t *} \\
+6.5.3 & \texttt{nl\_qpsk\_map\_to\_re} & \texttt{int} & \texttt{r}, \texttt{a\_kl}, \texttt{k} \\
+6.5.4 & \texttt{nl\_pwr\_calc\_pathloss} & \texttt{int} & 参考功率、RSRP、\texttt{*pl} \\
+6.5.4 & \texttt{nl\_pwr\_calc\_initial} & \texttt{int} & $M$, $P_0$, $P_L$, \texttt{*P} \\
+6.5.4 & \texttt{nl\_pwr\_dbm\_to\_linear} & \texttt{int} & dBm $\leftrightarrow$ 线性 \\
+6.5.4 & \texttt{nl\_pwr\_linear\_to\_dbm} & \texttt{int} & 同上 \\
+6.5.4 & \texttt{nl\_pwr\_aggregate} & \texttt{int} & 多通道功率聚合 \\
+6.5.5 & \texttt{nl\_meas\_rsrp/rssi/rsrq/sinr/cbra} & \texttt{int} & 见第 5 节 \\
+6.5.5 & \texttt{nl\_meas\_pms\_csi/timediff/aoa} & \texttt{int} & 见第 5 节 \\
+6.5.5 & \texttt{nl\_meas\_pms\_iq\_dbm} & \texttt{float} & IQ + RPL \\
+6.5.6 & \texttt{nl\_mod\_bits\_per\_symbol} & \texttt{uint8\_t} & \texttt{mod\_type} \\
+6.5.6 & \texttt{nl\_mod\_map} & \texttt{int} & bits / $N_{\mathrm{bit}}$ / 调制类型 / symbols \\
+6.5.6 & \texttt{nl\_mod\_*\_one} & \texttt{nl\_cplx\_t} & 单符号比特切片 \\
+6.5.7 & \texttt{nl\_scram\_calc\_cinit\_data} & \texttt{uint32\_t} & $n_f$ 低 7 位、$n_{g,\mathrm{pid}}$ \\
+6.5.7 & \texttt{nl\_scram\_apply} & \texttt{int} & in/out/$N_{\mathrm{bit}}$/$c_{\mathrm{init}}$ \\
+6.5.8 & \texttt{nl\_scfdma\_precode} & \texttt{int} & $x,y,M_{\mathrm{symb}},M_{\mathrm{sc}}$ \\
+6.5.9 & \texttt{nl\_zc\_largest\_prime\_less} & \texttt{uint16\_t} & $n$ \\
+6.5.9 & \texttt{nl\_zc\_group\_hop} & \texttt{int} & $n_s$, $n_{\mathrm{id},x}$, \texttt{*u} \\
+6.5.9 & \texttt{nl\_zc\_gen} / \texttt{\_m2\_table} & \texttt{int} & $u,v,\alpha,m,\mathrm{seq},M_{\mathrm{rs}}$ \\
+\bottomrule
+\end{longtable}
+
+%======================================================================
+\section{集成提示}
+%======================================================================
+
+\begin{enumerate}[nosep]
+  \item 外部模块只需 \texttt{\#include "nl\_phy.h"}，链接 \texttt{nl\_phy\_*.c} 并加 \texttt{-lm}。
+  \item 数据发送链推荐顺序：CRC(6.5.1) $\rightarrow$ 信道编码(6.2.6) $\rightarrow$ 加扰(6.5.7) $\rightarrow$ 调制(6.5.6) $\rightarrow$ 映射。
+  \item 控制发送链推荐顺序：CRC(6.5.1) $\rightarrow$ 极化(6.2.6) $\rightarrow$ QPSK(6.5.6) $\rightarrow$ 映射；参考信号走 6.5.3。
+  \item \texttt{nl\_scram\_apply} 当前内部 Gold 临时缓冲上限为 8192 bit；更长块需改实现或分段。
+  \item \texttt{nl\_meas\_pms\_aoa} / 部分 CSI 量化为工程简化实现，联调前请与 6.6 负责人确认精度要求。
+\end{enumerate}
+
+\vspace{1.5em}
+{\small\color{gray}
+字段级定义与完整公式以 T/XS 10001-2025 第 6.5 节为准。本文档依据仓库内已完成 C 头文件整理，供模块间接口对齐与联调。
+}
+
+\end{document}
