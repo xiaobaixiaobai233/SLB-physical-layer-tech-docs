@@ -1,0 +1,666 @@
+% !TEX program = xelatex
+\documentclass[11pt,a4paper]{ctexart}
+
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning}
+
+\geometry{left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm}
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue}
+
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+
+\title{%
+  \textbf{星闪 SLB 物理层}\\[0.4em]
+  \Large 6.6.3 角度信息测量技术文档\\[0.3em]
+  \large 端到端流水线 \textbullet\ AoA/AoD \textbullet\ 需要什么/从哪来 \textbullet\ 6.6.4 衔接
+}
+\author{依据 T/XS 10001-2025《星闪无线通信系统 接入层\\
+同步低时延宽带空口 SLB 技术要求和测试方法》整理\\
+（团体标准 20250326 版）\\[0.3em]
+\small 按端到端实现组织：每步给出\textbf{需要}、\textbf{从哪一节来}、\textbf{本步输出}；\\
+\small 标准正文 6.6.3 仅流程编排，测量量见 6.5.5.8，坐标见 6.6.4；\textbf{无}测角算法附录
+}
+\date{2026 年 7 月 23 日}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+%======================================================================
+\part{总览}
+%======================================================================
+
+\section{文档范围与模块划分}
+
+本文档给出 \textbf{6.6.3 角度信息测量}从启动到输出坐标（经 6.6.4）的\textbf{端到端}实现说明：每一步列出需要什么输入、输入来自标准哪一节/哪一层、本步输出什么、交给谁。覆盖 AoA（6.6.3.1）、AoD（6.6.3.2），以及单锚/多锚解算衔接（6.6.4.1 / 6.6.4.2）。
+
+\textbf{空口性质}：角度测量事件为\textbf{单向}（一端发 PMS，收端测角或匹配波束序号）。与 6.6.2.3``双方互测 CSI $\rightarrow$ 复合 $\rightarrow$ 距离''的\textbf{双向}路径解耦；单锚坐标解算时另跑 6.6.2 取距离。
+
+\begin{table}[h]
+\centering
+\small
+\caption{实现包模块划分}
+\begin{tabular}{lll}
+\toprule
+\textbf{模块} & \textbf{主题} & \textbf{核心输出/行为} \\
+\midrule
+A0 & 公共启动 & 能力、角色、XRC、同步、资源指示 \\
+A1 & AoA 空口（6.6.3.1） & 水平角、垂直角 \\
+A2 & AoD 空口（6.6.3.2） & 与 AoD 匹配的波束序号 \\
+A3 & 测量汇聚（6.6.1） & 角度报告送达解算节点 \\
+A4 & 可选测距（6.6.2） & 单锚路径所需距离 $D$ \\
+A5 & 坐标解算（6.6.4） & 标签绝对/相对坐标 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\small
+\caption{标准子节与本文档路径对应}
+\begin{tabular}{clp{7cm}}
+\toprule
+\textbf{标准子节} & \textbf{主题} & \textbf{本文档} \\
+\midrule
+6.6.3.1 & AoA 测量 & 路径 AoA：Step A1--A3 \\
+6.6.3.2 & AoD 测量 & 路径 AoD：Step D1--D3 \\
+6.6.4.1.1/1.2 & 单锚 AoA/AoD & Step S1--S3（联用 6.6.2） \\
+6.6.4.2.1/2.2 & 多锚 AoA/AoD & Step M1--M2（可不联用距离） \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{与相关章节的关系}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{2.8cm}L{1.5cm}L{9cm}}
+\toprule
+\textbf{节号} & \textbf{关系} & \textbf{说明} \\
+\midrule
+6.6.1 & 上游 & G 配置锚点/标签/解算节点；XRC 静/动态资源；测量任务含到达角/出发角；信息汇聚 \\
+6.2.3.9 & 上游 & PMS 波形生成与映射 \\
+6.2.4.6.6 & 上游 & 位置测量信号资源指示（时频、端口数、波束数） \\
+6.2.3 / 6.2.4.1--2 & 上游 & 同步信号 / SAB（测量前对表，若与测距同会话） \\
+6.5.5.8 & 上游 & AoA：坐标系、水平角 $[0,360)$、垂直角 $[0,180]$ \\
+第 7 章 & 上游 & XRC；\texttt{aoA-Estimation}/\texttt{aoD-Estimation}、端口/波束能力 IE \\
+6.6.2 & 并列上游 & 单锚 6.6.4.1 强制联用距离 \\
+6.6.4 & 下游 & 角度（±距离）$\rightarrow$ 坐标 \\
+附录 L & 无关 & 仅 6.6.2.3；角度路径不用 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{端到端流水线总览}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  box/.style={draw,rounded corners,align=center,font=\small,minimum height=0.8cm,minimum width=2.0cm},
+  arr/.style={-{Stealth[length=2mm]},thick}
+]
+  \node[box,fill=gray!12] (a0) {A0\\能力角色XRC};
+  \node[box,right=0.45cm of a0,fill=blue!8] (res) {资源指示\\6.2.4.6.6};
+  \node[box,right=0.45cm of res,fill=orange!12] (pms) {单向 PMS\\6.2.3.9};
+  \node[box,right=0.45cm of pms,fill=green!10] (meas) {AoA/AoD\\6.6.3};
+  \node[box,right=0.45cm of meas,fill=yellow!15] (rep) {汇聚\\6.6.1};
+  \node[box,right=0.45cm of rep] (fix) {坐标\\6.6.4};
+  \draw[arr] (a0) -- (res);
+  \draw[arr] (res) -- (pms);
+  \draw[arr] (pms) -- (meas);
+  \draw[arr] (meas) -- (rep);
+  \draw[arr] (rep) -- (fix);
+  \node[below=0.55cm of meas,font=\scriptsize,align=center] (note) {单锚：并行/串行插入 6.6.2 距离};
+  \draw[arr,dashed] (rep.south) |- (note.east);
+\end{tikzpicture}
+\end{figure}
+
+阅读顺序：\textbf{公共启动 A0} $\rightarrow$ 选 \textbf{AoA 或 AoD} 空口路径 $\rightarrow$ \textbf{汇聚} $\rightarrow$ 按单锚/多锚进入 \textbf{6.6.4}（单锚须有 6.6.2 距离）。
+
+\newpage
+%======================================================================
+\part{6.6.3 工程解读}
+%======================================================================
+
+\section{协议章节对应}
+
+对应 T/XS 10001-2025 第 6 章 \textbf{6.6.3}（6.6.3.1 AoA、6.6.3.2 AoD）。端到端闭合依赖：\textbf{6.6.1}（配置与汇聚）、\textbf{6.5.5.8}（AoA 语义）、\textbf{6.6.2}（单锚距离）、\textbf{6.6.4}（坐标）、\textbf{第 7 章}（能力/XRC）。
+
+\section{功能定义}
+
+\begin{enumerate}[nosep]
+  \item 在 G 完成角色与资源配置后，组织单向 PMS 角度测量；
+  \item AoA：收端输出水平角、垂直角（语义 6.5.5.8）；
+  \item AoD：收端输出与出发角匹配的波束序号；
+  \item 将测量结果汇聚到解算节点，按 6.6.4 与可选距离融合为坐标。
+\end{enumerate}
+
+\section{模块边界（上下游及职责划分）}
+
+\subsection{上游模块}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{3.2cm}L{4.2cm}L{5.5cm}}
+\toprule
+\textbf{上游} & \textbf{输入} & \textbf{说明} \\
+\midrule
+6.6.1 & 角色、资源、测量任务 & ``G 配置锚点与标签''正文出处 \\
+第 7 章 & 能力 IE、XRC PDU & 能否配 AoA/AoD \\
+6.2.4.6.6 & 时频/端口/波束指示 & 当次发收资源 \\
+6.2.3.9 & PMS 波形 & 空口发射 \\
+6.5.5.8 & AoA 坐标系与范围 & 角度量定义 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{下游模块}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{3.2cm}L{4.2cm}L{5.5cm}}
+\toprule
+\textbf{下游} & \textbf{输出} & \textbf{说明} \\
+\midrule
+解算节点 & AoA 或波束序号 & 经 6.6.1 汇聚 \\
+6.6.4.1 / 6.6.4.2 & 标签坐标 & 单锚须另有距离 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{本模块不负责的内容}
+
+\begin{itemize}[nosep]
+  \item 双向 CSI 复合与附录 L 解距（6.6.2.3）；
+  \item AoA/AoD 阵列估计算法细节（标准未规定）；
+  \item 坐标几何闭合公式细节（属 6.6.4 实现）；
+  \item PMS 符号级生成（6.2.3.9）。
+\end{itemize}
+
+\section{在 SLB 通信流程中的角色}
+
+配置面（6.6.1 + 第 7 章）$\rightarrow$ 资源指示（6.2.4.6.6）$\rightarrow$ 单向 PMS（6.2.3.9）$\rightarrow$ 收端 AoA/AoD（6.6.3）$\rightarrow$ 汇聚（6.6.1）$\rightarrow$ 可选测距（6.6.2）$\rightarrow$ 坐标（6.6.4）。
+
+%======================================================================
+\section{关键参数与强制要求}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{3.0cm}L{4.5cm}L{3.8cm}l}
+\toprule
+\textbf{参数/对象} & \textbf{作用} & \textbf{约束} & \textbf{条款} \\
+\midrule
+锚点/标签角色 & 谁发谁收 & 测量前必须配置 & 6.6.1；6.6.3.1/2 \\
+解算节点 & 收角度、出坐标 & 6.6.1 指派 & 6.6.1；6.6.4 \\
+\texttt{aoA-Estimation} & 能力门控 & true 才可配 AoA & 第 7 章 \\
+\texttt{aoD-Estimation} & 能力门控 & true 才可配 AoD & 第 7 章 \\
+端口/波束数 & PMS 形态 & $\le$ \texttt{portNumber}/\texttt{beamNumber} & 6.6.1；第 7 章 \\
+AoA 水平角 & 到达方向 & $[0,360)$，相对 $X$ 逆时针 & 6.5.5.8 \\
+AoA 垂直角 & 到达方向 & $[0,180]$，相对 $Z$ & 6.5.5.8 \\
+AoD 输出 & 波束序号 & 仅基于波束的 PMS & 6.6.3.2 \\
+单锚距离 $D$ & 与角度联立 & 须走 6.6.2 & 6.6.4.1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{6.6.3 核心详解}
+%======================================================================
+
+按端到端步骤展开。下列每步统一给出：\textbf{步骤作用}、\textbf{需要}、\textbf{从哪来}、\textbf{本步动作}、\textbf{输出}。
+
+%----------------------------------------------------------------------
+\subsection{公共启动（所有角度路径共用）}
+\label{sec:common}
+%----------------------------------------------------------------------
+
+\subsubsection{Step 0 节点能力与角色就绪}
+
+\textbf{步骤作用}：确认节点能做 AoA/AoD，并具备锚点/标签/解算身份；本步不发 PMS。
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{3.2cm}L{5.0cm}L{4.8cm}}
+\toprule
+\textbf{需要} & \textbf{用途} & \textbf{从哪来} \\
+\midrule
+\texttt{aoA-Estimation} & 是否允许配 AoA 任务 & 第 7 章 T 节点定位能力反馈 IE \\
+\texttt{aoD-Estimation} & 是否允许配 AoD 任务 & 同上 \\
+\texttt{portBasedTxSignal}/\texttt{portNumber} & 端口发送能力上限 & 同上 \\
+\texttt{beamBasedTxSignal}/\texttt{beamNumber}/\texttt{beamGAP} & 波束发送能力与切换间隙 & 同上 \\
+本节点角色候选 & 锚点/标签/解算 & 6.6.1：G 可配置三类角色；T/G 均可担任 \\
+可选：锚点坐标 & 单锚/多锚解算几何 & 6.6.1：G 配置/读取锚点绝对或相对位置 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{enumerate}[nosep]
+  \item \textbf{本步动作}：能力查询/反馈交互 $\rightarrow$ 本地能力表；角色未指派则不得进入 Step 1。
+  \item \textbf{输出}：能力标志 + 角色候选；能力为假则阻断对应角度配置。
+\end{enumerate}
+
+\subsubsection{Step 1 G 配置位置锚点与位置标签（及解算节点）}
+
+\textbf{步骤作用}：落实标准原文``G 节点配置位置锚点和位置标签''（6.6.3.1 / 6.6.3.2 首句）；配置内容的\textbf{字段出处在 6.6.1}，6.6.3 只引用该结果。
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{3.5cm}L{4.8cm}L{4.7cm}}
+\toprule
+\textbf{需要} & \textbf{用途} & \textbf{从哪来} \\
+\midrule
+指派位置锚点 & 谁在测角几何中作参考 & \textbf{6.6.1}：G 配置位置锚点 \\
+指派位置标签 & 被定位目标 & \textbf{6.6.1}：G 配置位置标签 \\
+指派解算节点 & 谁收测量信息并出坐标 & \textbf{6.6.1}：G 配置位置信息解算节点 \\
+发送侧资源 & 时频、端口数、波束数、载波、带宽、序列 & \textbf{6.6.1}：XRC 配发送；动态时再用资源指示 \\
+接收侧资源 & 同上 + 测量信息使能 & \textbf{6.6.1}：XRC 配接收；可配测到达角/出发角等 \\
+可选测量任务 & 使能到达角和/或出发角 & \textbf{6.6.1}：测量信息含到达角、出发角 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{enumerate}[nosep]
+  \item \textbf{本步动作}：高层按第 7.5 章组 XRC（物理层不组包，只消费解析结果）$\rightarrow$ 写入定位上下文。
+  \item \textbf{输出}：\texttt{slb\_pos\_angle\_ctx}（角色表、发/收资源摘要、AoA/AoD 任务开关）。
+  \item \textbf{实现检查}：AoA 任务要求收端 \texttt{aoA-Estimation}=true；AoD 任务要求相关节点 \texttt{aoD-Estimation}=true，且发送为基于波束。
+\end{enumerate}
+
+\subsubsection{Step 2 当次时频 / 端口 / 波束指示}
+
+\textbf{步骤作用}：给出``这一次''发 PMS 用的符号位置与端口/波束数量。
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{3.5cm}L{4.8cm}L{4.7cm}}
+\toprule
+\textbf{需要} & \textbf{用途} & \textbf{从哪来} \\
+\midrule
+无线帧/符号资源 & PMS 落点 & \textbf{6.2.4.6.6} 位置测量信号资源指示；或 \textbf{6.6.1} XRC 已写死的时间资源 \\
+端口数量 & AoA 可用端口 PMS & 同上；上限见第 7 章 \texttt{portNumber} \\
+波束数量 & AoA 可选 / AoD 必选 & 同上；上限 \texttt{beamNumber}；\texttt{beamGAP} 决定是否留切换间隙 \\
+载波/带宽/序列 & 波形参数 & \textbf{6.6.1} XRC；生成走 \textbf{6.2.3.9} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{enumerate}[nosep]
+  \item \textbf{输出}：当次资源描述（符号区间、端口列表或波束列表）。
+  \item \textbf{说明}：角度路径\textbf{不}依赖 FLAG 的 GCI 第四格式激活（那是 6.6.2.2）；若与 FLAG/RTT 同会话，同步 SAB 仍按 6.2.3 / 6.2.4.1--2 / 6.6.2.2 要求执行。
+\end{enumerate}
+
+\subsubsection{Step 3（可选）同步基准}
+
+\textbf{步骤作用}：多节点同会话测角或随后测距时对齐时间基准。
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{3.2cm}L{5.0cm}L{4.8cm}}
+\toprule
+\textbf{需要} & \textbf{用途} & \textbf{从哪来} \\
+\midrule
+同步信号 / SAB & 对表 & 波形 \textbf{6.2.3.1}；同步信息 \textbf{6.2.4.1}；SAB \textbf{6.2.4.2} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{输出}：节点时间对齐状态。纯单跳 AoA、且不联用 TOA/RTT 时，实现可按产品策略弱化，但与 6.6.2 联用时必须同步。
+
+%----------------------------------------------------------------------
+\subsection{路径 AoA：6.6.3.1}
+\label{sec:aoa}
+%----------------------------------------------------------------------
+
+\subsubsection{适用条件与角色约定}
+
+\begin{itemize}[nosep]
+  \item 标准：发送基于\textbf{端口和/或波束}的 PMS；\textbf{接收节点}测 AoA。
+  \item 单锚坐标（6.6.4.1.1）约定：\textbf{标签发}、\textbf{锚点收并测 AoA}。
+  \item 多锚坐标（6.6.4.2.1）：\textbf{标签发}、\textbf{多个锚点}分别测 AoA。
+\end{itemize}
+
+\subsubsection{Step A1 发送 PMS}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{3.2cm}L{5.0cm}L{4.8cm}}
+\toprule
+\textbf{需要} & \textbf{用途} & \textbf{从哪来} \\
+\midrule
+发送节点身份 & 谁发 & Step 1 角色；单锚场景为标签（6.6.4.1.1） \\
+端口和/或波束配置 & PMS 形态 & Step 2；条文 \textbf{6.6.3.1} \\
+PMS 符号 & 空口波形 & 生成算法 \textbf{6.2.3.9}；落在 Step 2 指示的符号上 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{本步动作}：按端口和/或波束依次（或并行端口）发射 PMS。\\
+\textbf{输出}：空口已发的测量符号；发送侧可选记 TOD（若同会话还要测距，见 6.5.5.7 / 6.6.2）。
+
+\subsubsection{Step A2 接收并测量 AoA}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{3.2cm}L{5.0cm}L{4.8cm}}
+\toprule
+\textbf{需要} & \textbf{用途} & \textbf{从哪来} \\
+\midrule
+接收节点身份 & 谁测角 & Step 1；单锚为锚点（6.6.4.1.1） \\
+接收资源与阵列快照 & 天线处观测 & Step 2 接收配置；阵列硬件 \\
+AoA 语义 & 报告格式与坐标系 & \textbf{6.5.5.8}：水平角、垂直角及参考系 \\
+估计算法 & 从阵列快照 $\rightarrow$ 角度 & \textbf{标准未规定}；实现自定（无附录） \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{本步动作}：在天线处确定到达方向 $\rightarrow$ 输出水平角 $\in[0,360)$、垂直角 $\in[0,180]$。\\
+\textbf{输出}：\texttt{(azimuth\_deg, elevation\_deg)} + 测量节点 ID + 可选质量指示。
+
+\subsubsection{Step A3 上报汇聚}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{3.2cm}L{5.0cm}L{4.8cm}}
+\toprule
+\textbf{需要} & \textbf{用途} & \textbf{从哪来} \\
+\midrule
+AoA 测量结果 & 解算输入 & Step A2 \\
+上报目标 & 送到解算节点/G & \textbf{6.6.1} 测量信息汇聚规则；报告消息属第 7 章 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{输出}：解算节点侧 AoA 测量集（单锚 1 条；多锚 $N$ 条）。
+
+\subsubsection{AoA 数据流一览}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{步骤} & \textbf{输入} & \textbf{来源} & \textbf{输出} \\
+\midrule
+0--2 & 能力/角色/资源 & 第 7 章；6.6.1；6.2.4.6.6 & 上下文 \\
+A1 & 端口/波束配置 & 6.6.3.1；6.2.3.9 & 空口 PMS \\
+A2 & 阵列快照 & 6.5.5.8 语义 & 水平角+垂直角 \\
+A3 & AoA & 6.6.1 汇聚 & 解算节点测量集 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%----------------------------------------------------------------------
+\subsection{路径 AoD：6.6.3.2}
+\label{sec:aod}
+%----------------------------------------------------------------------
+
+\subsubsection{适用条件与角色约定}
+
+\begin{itemize}[nosep]
+  \item 标准：发送\textbf{基于波束}的 PMS；接收节点确定与 AoD 匹配的\textbf{波束序号}。
+  \item 单锚坐标（6.6.4.1.2）：\textbf{锚点发}、\textbf{标签收并匹配波束序号}。
+  \item 多锚坐标（6.6.4.2.2）：\textbf{各锚点发}、\textbf{标签}得到多个出发角（波束序号）信息。
+\end{itemize}
+
+\subsubsection{Step D1 发送基于波束的 PMS}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{3.2cm}L{5.0cm}L{4.8cm}}
+\toprule
+\textbf{需要} & \textbf{用途} & \textbf{从哪来} \\
+\midrule
+发送节点 & 谁扫波束 & Step 1；单锚为锚点（6.6.4.1.2） \\
+波束数量与顺序 & 扫描表 & Step 2；\textbf{6.6.3.2} 要求基于波束 \\
+\texttt{beamGAP} & 波束切换是否插间隙 & 第 7 章能力；配置落实在资源/帧结构 \\
+PMS 波形 & 每波束一次发射 & \textbf{6.2.3.9} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{输出}：按波束序号顺序（或配置顺序）发出的 PMS 序列。\\
+\textbf{约束}：不得仅用``无波束的纯端口 PMS''完成本路径。
+
+\subsubsection{Step D2 接收并匹配波束序号}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{3.2cm}L{5.0cm}L{4.8cm}}
+\toprule
+\textbf{需要} & \textbf{用途} & \textbf{从哪来} \\
+\midrule
+接收节点 & 谁做匹配 & Step 1；单锚为标签（6.6.4.1.2） \\
+各波束接收质量 & 判决依据 & 空口相关/功率等（实现） \\
+波束序号定义 & 输出离散索引 & 与发送侧配置的波束表一致（6.6.1 / Step 2） \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{本步动作}：在多个波束 PMS 上判决，输出与 AoD 匹配的波束序号。\\
+\textbf{输出}：\texttt{beam\_index}（实现约定 $0\ldots N_{\mathrm{beam}}-1$）+ 测量节点 ID。\\
+\textbf{说明}：标准要的是\textbf{波束序号}，不是 6.5.5.8 那套连续角度公式；若产品要把序号映射为名义角度，映射表属实现，非标准附录。
+
+\subsubsection{Step D3 上报汇聚}
+
+同 Step A3 结构：按 \textbf{6.6.1} 将波束序号送解算节点；消息封装见第 7 章。
+
+\subsubsection{AoD 数据流一览}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{步骤} & \textbf{输入} & \textbf{来源} & \textbf{输出} \\
+\midrule
+0--2 & 能力/角色/波束资源 & 第 7 章；6.6.1；6.2.4.6.6 & 上下文 \\
+D1 & 波束配置 & 6.6.3.2；6.2.3.9 & 波束 PMS 序列 \\
+D2 & 接收序列 & 实现判决 & 波束序号 \\
+D3 & 波束序号 & 6.6.1 汇聚 & 解算节点测量集 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%----------------------------------------------------------------------
+\subsection{单锚坐标闭合（6.6.4.1）}
+\label{sec:single}
+%----------------------------------------------------------------------
+
+\subsubsection{Step S1 取得角度（调用 6.6.3）}
+
+\begin{itemize}[nosep]
+  \item \textbf{基于 AoA（6.6.4.1.1）}：执行路径 AoA；\textbf{需要}标签发 + 锚点 AoA（来自 6.6.3.1）。
+  \item \textbf{基于 AoD（6.6.4.1.2）}：执行路径 AoD；\textbf{需要}锚点发 + 标签波束序号（来自 6.6.3.2）。
+\end{itemize}
+
+\subsubsection{Step S2 取得距离（调用 6.6.2）}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{3.2cm}L{5.0cm}L{4.8cm}}
+\toprule
+\textbf{需要} & \textbf{用途} & \textbf{从哪来} \\
+\midrule
+锚点--标签距离 $D$ & 与角度联立解坐标 & \textbf{6.6.2} 任一测距方式（RTT / FLAG / 6.6.2.3 等） \\
+测距会话配置 & 谁与谁测 & 同对锚点/标签；配置见对应 6.6.2.x \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{说明}：此步是\textbf{双向或 FLAG/跳频}测距流水线，与 6.6.3 单向测角\textbf{分开实现}；可串行（先角后距或先距后角）或同配置会话内并行调度。
+
+\subsubsection{Step S3 解算节点出坐标}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{3.2cm}L{5.0cm}L{4.8cm}}
+\toprule
+\textbf{需要} & \textbf{用途} & \textbf{从哪来} \\
+\midrule
+AoA 或 AoD 信息 & 方向约束 & Step S1（6.6.3） \\
+距离 $D$ & 径向约束 & Step S2（6.6.2） \\
+锚点坐标 & 参考点 & \textbf{6.6.1} G 配置/读取的锚点位置 \\
+解算算法 & 角度+距离 $\rightarrow$ 标签坐标 & \textbf{6.6.4.1} 要求输出坐标；公式实现自定 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{输出}：位置标签坐标（绝对或相对，与 6.6.1 位置信息类型一致）。
+
+%----------------------------------------------------------------------
+\subsection{多锚坐标闭合（6.6.4.2.1 / 6.6.4.2.2）}
+\label{sec:multi}
+%----------------------------------------------------------------------
+
+\subsubsection{Step M1 多节点角度测量}
+
+\begin{itemize}[nosep]
+  \item \textbf{多锚 AoA（6.6.4.2.1）}：\textbf{需要}一个标签 + 多个锚点角色（6.6.1）；标签发 PMS；\textbf{每个锚点}按 6.6.3.1 测 AoA 并上报。
+  \item \textbf{多锚 AoD（6.6.4.2.2）}：\textbf{需要}多个锚点发波束 PMS；标签按 6.6.3.2 得到多个出发角（波束序号）信息并上报。
+\end{itemize}
+
+\subsubsection{Step M2 仅用多角度解坐标}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{3.2cm}L{5.0cm}L{4.8cm}}
+\toprule
+\textbf{需要} & \textbf{用途} & \textbf{从哪来} \\
+\midrule
+多条 AoA 或多项 AoD & 交会定位 & Step M1 \\
+各锚点坐标 & 几何参考 & \textbf{6.6.1} \\
+解算算法 & 多角度 $\rightarrow$ 标签坐标 & \textbf{6.6.4.2.1/2}；公式实现自定 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{输出}：标签坐标。\textbf{不强制} 6.6.2 距离（与单锚 6.6.4.1 不同）。
+
+%----------------------------------------------------------------------
+\subsection{AoA / AoD / 测距对照}
+%----------------------------------------------------------------------
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{2.2cm}L{4.2cm}L{4.2cm}L{2.8cm}}
+\toprule
+\textbf{项} & \textbf{6.6.3.1 AoA} & \textbf{6.6.3.2 AoD} & \textbf{6.6.2.3 测距} \\
+\midrule
+方向性 & 单向 & 单向 & 双向 CSI \\
+PMS 形态 & 端口和/或波束 & 仅波束 & 端口或波束（+跳频） \\
+收端输出 & 水平角+垂直角 & 波束序号 & CSI(IQ) \\
+解算 & 6.6.4（±距离） & 6.6.4（±距离） & 复合$\rightarrow$距离（附录 L） \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{数据类型、长度与维度}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{对象} & \textbf{类型/维数} & \textbf{上下文} & \textbf{条款} \\
+\midrule
+AoA 水平角 & 标量，度 & $[0,360)$ & 6.5.5.8 \\
+AoA 垂直角 & 标量，度 & $[0,180]$ & 6.5.5.8 \\
+AoD 波束序号 & 整数 & $0\ldots N_{\mathrm{beam}}-1$（实现） & 6.6.3.2 \\
+端口数 / 波束数 & 配置整数 & $\le$ 能力上限 & 6.6.1；第 7 章 \\
+距离 $D$ & 标量，米 & 仅单锚 6.6.4.1 需要 & 6.6.2 \\
+锚点坐标 & 绝对或相对三维 & 解算参考 & 6.6.1 \\
+标签坐标 & 绝对或相对三维 & 最终输出 & 6.6.4 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{时序关系与触发条件}
+%======================================================================
+
+\begin{enumerate}[nosep]
+  \item Step 0 能力/角色 $\rightarrow$ Step 1 XRC 配置（6.6.1）$\rightarrow$ Step 2 当次资源指示；
+  \item 空口单向 PMS 仅在资源生效后执行（A1/D1）；
+  \item 收端测量（A2/D2）紧跟对应接收资源；
+  \item 汇聚（A3/D3）在本地测量完成后，按 6.6.1 交给解算节点；
+  \item 单锚：角度与 6.6.2 距离均就绪后才进入 Step S3；
+  \item 多锚：收齐 $N$ 个锚点角度（或多项 AoD）后进入 Step M2。
+\end{enumerate}
+
+%======================================================================
+\section{处理步骤}
+%======================================================================
+
+\begin{enumerate}[nosep]
+  \item \textbf{Step 0}：能力 IE（第 7 章）+ 角色候选（6.6.1）；
+  \item \textbf{Step 1}：G 经 XRC 配置锚点/标签/解算及端口波束与 AoA/AoD 任务（\textbf{6.6.1}；6.6.3 首句引用）；
+  \item \textbf{Step 2}：当次时频/端口/波束（\textbf{6.2.4.6.6} 或 XRC）；
+  \item \textbf{Step 3（可选）}：同步（6.2.3 / 6.2.4）；
+  \item \textbf{空口}：AoA $\rightarrow$ A1--A3；或 AoD $\rightarrow$ D1--D3（\textbf{6.6.3}）；
+  \item \textbf{闭合}：单锚 S1--S3（+ \textbf{6.6.2}）；多锚 M1--M2（\textbf{6.6.4}）。
+\end{enumerate}
+
+%======================================================================
+\section{约束与实现要点}
+%======================================================================
+
+\begin{enumerate}[nosep]
+  \item \textbf{【配置出处】}：``G 配置位置锚点与位置标签''的字段与信令在 \textbf{6.6.1} / 第 7 章；6.6.3 只规定配置完成后的测角行为。
+  \item \textbf{【单向】}：6.6.3 空口为单向 PMS；不得按 6.6.2.3 双向 CSI 复合状态机实现测角。
+  \item \textbf{【无附录算法】}：无测角资料性附录；AoA 估计算法、波束匹配算法、坐标几何公式均实现自定。
+  \item \textbf{【AoA 形态】}：端口和/或波束均可（6.6.3.1）；报告须符合 6.5.5.8 坐标系与范围。
+  \item \textbf{【AoD 形态】}：必须基于波束；输出为波束序号（6.6.3.2）。
+  \item \textbf{【能力门控】}：\texttt{aoA-Estimation}/\texttt{aoD-Estimation} 为假则拒配对应任务（第 7 章）。
+  \item \textbf{【单锚联用距离】}：6.6.4.1 要求同时具备 6.6.3 角度与 6.6.2 距离。
+  \item \textbf{【多锚可不测距】}：6.6.4.2.1/2 可仅用多角度解算。
+\end{enumerate}
+
+%======================================================================
+\section{与标准其他章节的衔接}
+%======================================================================
+
+\begin{itemize}[nosep]
+  \item \textbf{6.6.1}：角色、XRC 资源、测量任务、汇聚——配置``需要什么''的主出处；
+  \item \textbf{第 7 章}：能力 IE 与 XRC/报告消息；
+  \item \textbf{6.2.4.6.6 / 6.2.3.9}：当次资源与 PMS 波形；
+  \item \textbf{6.5.5.8}：AoA 水平角/垂直角定义；
+  \item \textbf{6.6.2}：单锚坐标的距离输入；
+  \item \textbf{6.6.2.3 / 附录 L}：并列测距路径，非本节依赖；
+  \item \textbf{6.6.4}：角度（±距离）到坐标的闭合。
+\end{itemize}
+
+\vfill
+\begin{center}
+\small\textcolor{gray}{完整字段与信令以 T/XS 10001-2025 为准。本文档按端到端步骤列出每处``需要什么 / 从哪一节来''，
+供 6.6.3 角度测量实现与联调；标准未提供本节测角算法附录。}
+\end{center}
+
+\end{document}
