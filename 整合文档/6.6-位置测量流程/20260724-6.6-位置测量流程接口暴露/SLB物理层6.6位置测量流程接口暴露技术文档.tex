@@ -1,0 +1,711 @@
+% !TEX program = xelatex
+\documentclass[11pt,a4paper]{ctexart}
+
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{listings}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning}
+
+\geometry{left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm}
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue}
+
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newcolumntype{C}[1]{>{\centering\arraybackslash}p{#1}}
+
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  keywordstyle=\bfseries,
+  commentstyle=\itshape\color{gray!70!black},
+  breaklines=true,
+  columns=fullflexible,
+  frame=single,
+  rulecolor=\color{black!25},
+  xleftmargin=0.6em,
+  xrightmargin=0.6em,
+  aboveskip=0.6em,
+  belowskip=0.6em,
+  showstringspaces=false,
+  morekeywords={struct,typedef,enum,const,uint8_t,uint16_t,uint32_t,int32_t,bool,size_t,double,float}
+}
+
+\title{%
+  \textbf{星闪 SLB 物理层}\\[0.4em]
+  \Large 6.6 位置测量流程接口暴露技术文档\\[0.3em]
+  \large 对外 API \textbullet\ 跨模块调用 \textbullet\ 参数边界 \textbullet\ nearlink-naming
+}
+\author{依据 T/XS 10001-2025《星闪无线通信系统 接入层\\
+同步低时延宽带空口 SLB 技术要求和测试方法》整理\\
+（团体标准 20250326 版）\\[0.3em]
+\small 面向实现与联调：规定 6.6 模块\textbf{对外暴露}与\textbf{必须调用}的接口合约；\\
+\small 命名约定 airMode\,=\,\texttt{slb}（nearlink-naming）
+}
+\date{2026 年 7 月 24 日}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+%======================================================================
+\part{总览}
+%======================================================================
+
+\section{文档范围与模块划分}
+
+本文档给出 \textbf{6.6 位置测量流程}整包（6.6.1--6.6.4）在工程落地时的\textbf{接口暴露合约}：
+本模块向调度器 / MAC / 解算应用暴露哪些函数与类型；本模块为实现流程必须调用其他章节哪些函数与回调。
+\textbf{不}复述测距公式与 FLAG 时序细节（见既有 6.6.2/6.6.3/6.6.4 技术文档），只规定\textbf{边界上可交换的数据与调用点}。
+
+\textbf{设计原则（接口谨慎暴露）}：
+\begin{enumerate}[nosep]
+  \item \textbf{只暴露测量 IE 与编排命令}，不暴露 ASN.1 原文、射频驱动句柄、内部缓冲布局；
+  \item \textbf{XRC / 报告 PDU 由高层组包}，本模块仅消费解析结果、产出待封装 IE；
+  \item \textbf{空口 TX/RX 经回调触发}，本模块不直接持有基带 DMA；
+  \item \textbf{物理量一律带单位后缀}（\texttt{Ms}/\texttt{Us}/\texttt{Hz}/\texttt{Dbm} 等）；
+  \item \textbf{用条件判断驱动流程}，不对外暴露状态机跳转表（见 §C1）。
+\end{enumerate}
+
+\begin{table}[h]
+\centering
+\small
+\caption{6.6 接口包划分（建议源码目录 \texttt{nearlink/slb/pos/}）}
+\begin{tabular}{lll}
+\toprule
+\textbf{包代号} & \textbf{主题} & \textbf{对外核心行为} \\
+\midrule
+P0 & 公共类型 / 错误码 & 角色、PhyID、坐标系、统一返回码 \\
+P1 & 配置应用（6.6.1） & 应用 XRC/GCI 解析结果，写入定位上下文 \\
+P2 & RTT 测距（6.6.2.1） & 由 $T_a$--$T_d$ 算距离；组装时间差 IE \\
+P3 & FLAG 编排（6.6.2.2） & 建组校验、激活响应、下一发信成员选择 \\
+P4 & 跳频复合（6.6.2.3） & 跳索引推进、CSI 复合与解距入口 \\
+P5 & 角度编排（6.6.3） & AoA/AoD 任务触发与角度 IE 组装 \\
+P6 & 坐标解算（6.6.4） & 汇聚测量集 $\rightarrow$ 标签坐标 \\
+P7 & 报告适配 & 测量 IE $\rightarrow$ 高层可封装字段表 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{与相关章节的关系}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{3.2cm}L{1.6cm}L{8.5cm}}
+\toprule
+\textbf{相关节号} & \textbf{关系} & \textbf{接口含义} \\
+\midrule
+第 7.1 / 7.5 章 & 上游 & 提供已解析 XRC / 测量组 / 能力 IE；本模块\textbf{禁止}自行 ASN.1 编码 \\
+6.2.3.9 & 上游依赖调用 & 调用 PMS 生成与映射 API \\
+6.2.4.6.6 / 6.7 & 上游依赖调用 & 调用 GCI/TCI 位置测量资源编解码 \\
+6.2.3 / 6.2.4.1--2 & 上游依赖调用 & SAB/FTS 同步完成指示（回调入参） \\
+6.5.5.6 & 上游依赖调用 & 调用 PMS CSI 估计 API \\
+6.5.5.7 & 上游依赖调用 & 调用 TOA/TOD 时间戳 API \\
+6.5.5.8 & 上游依赖调用 & 调用 AoA 估计 API（角度路径） \\
+6.6.1--6.6.4 & 本包 & 编排 + 距离/角度汇聚 + 坐标闭合 \\
+MAC / 调度器 & 下游 & 消费 TX/RX 命令与报告 IE \\
+应用 / 解算宿主 & 下游 & 消费 \texttt{SlbPosFixResult} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{接口分层示意}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  box/.style={draw,rounded corners,align=center,font=\small,minimum height=0.9cm,minimum width=2.3cm},
+  arr/.style={-{Stealth[length=2mm]},thick}
+]
+  \node[box,fill=gray!12] (mac) {第 7 章\\XRC/报告};
+  \node[box,right=0.45cm of mac,fill=blue!8] (ctrl) {6.2.4\\GCI/TCI};
+  \node[box,right=0.45cm of ctrl,fill=orange!12] (wave) {6.2.3.9\\PMS};
+  \node[box,right=0.45cm of wave,fill=yellow!18] (meas) {6.5.5\\CSI/TOA/AoA};
+  \node[box,below=1.1cm of ctrl,fill=green!12,minimum width=7.2cm] (pos) {6.6 \texttt{slbPos*} 编排与解算};
+  \node[box,below=1.1cm of pos,fill=gray!8,minimum width=4.5cm] (app) {调度器 / 解算应用};
+  \draw[arr] (mac) -- (pos);
+  \draw[arr] (ctrl) -- (pos);
+  \draw[arr] (wave) -- (pos);
+  \draw[arr] (meas) -- (pos);
+  \draw[arr] (pos) -- (app);
+\end{tikzpicture}
+\caption{6.6 位于编排层：上接配置与测量量，下接调度与解算宿主}
+\end{figure}
+
+\newpage
+%======================================================================
+\part{6.6 接口暴露工程解读}
+%======================================================================
+
+\section{协议章节对应}
+
+对应 T/XS 10001-2025：
+\begin{itemize}[nosep]
+  \item 6.6.1 一般概述（角色、XRC、汇聚）；
+  \item 6.6.2 距离位置信息测量（RTT / FLAG / 跳频复合）；
+  \item 6.6.3 角度位置信息测量（AoA / AoD）；
+  \item 6.6.4 定位信息解算；
+  \item 实现依赖：6.2.3.9、6.2.4.6.6/6.7、6.5.5.6--6.5.5.8、第 7 章。
+\end{itemize}
+
+\section{功能定义}
+
+\begin{enumerate}[nosep]
+  \item 接收高层已解析的定位配置，建立/更新 \texttt{SlbPosContext}；
+  \item 在调度器事件驱动下编排 PMS 发收时机（条件判断，不暴露 FSM）；
+  \item 消费 6.5.5 测量量，计算距离 / 组装角度与时间差 IE；
+  \item 在解算节点汇聚多锚点测量，输出标签坐标；
+  \item 向 MAC 提供报告 IE，向基带提供 TX/RX 触发命令。
+\end{enumerate}
+
+\section{模块边界（上下游及职责划分）}
+
+\subsection{上游模块}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{3.6cm}L{4.5cm}L{5cm}}
+\toprule
+\textbf{上游} & \textbf{输入（已解析）} & \textbf{本模块调用} \\
+\midrule
+第 7 章解析器 & XRC / 建组 / 能力结构体 & \texttt{slbPosApplyXrcConfig} 等 \\
+6.2.4 GCI/TCI & 资源描述 / 第四格式字段 & \texttt{slbDecodeGciPos*}（外部） \\
+6.2.3.9 PMS & 符号级波形就绪 & \texttt{slbGeneratePms*}（外部） \\
+6.5.5.6--6.5.5.8 & CSI / TOA-TOD / AoA & \texttt{slbEstimate*}（外部） \\
+帧定时 / SAB & 同步完成标志 & 回调入参 \texttt{isSynced} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{下游模块}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{3.6cm}L{4.5cm}L{5cm}}
+\toprule
+\textbf{下游} & \textbf{输出} & \textbf{说明} \\
+\midrule
+调度器 / 基带适配 & \texttt{SlbPosAirCommand} & TX/RX 符号索引、端口、波束 \\
+MAC 报告组装 & \texttt{SlbPosReportIe} & 时间差 / TOA / CSI / 角度 IE \\
+6.6.4 解算宿主 & \texttt{SlbPosFixResult} & 绝对/相对坐标 \\
+G 调度策略 & 组激活应答 / 拒配码 & 配置校验失败时阻断开测 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{本模块不负责的内容}
+
+\begin{itemize}[nosep]
+  \item XRC / 测量报告的 ASN.1 UNALIGNED PER 编解码 $\rightarrow$ 第 7 章；
+  \item PMS 序列生成与 RE 映射算法细节 $\rightarrow$ 6.2.3.9；
+  \item GCI/TCI 信道编码与资源栅格映射 $\rightarrow$ 6.2.4；
+  \item CSI/TOA/AoA 物理估计算法内核 $\rightarrow$ 6.5.5.6--6.5.5.8；
+  \item 射频调谐、LBT 能量检测硬件 $\rightarrow$ RF/MAC（本模块只传等待时长与切跳命令）。
+\end{itemize}
+
+\section{在 SLB 通信流程中的角色}
+
+\begin{enumerate}[nosep]
+  \item 接入与 XRC 完成后，调度器调用配置应用接口写入上下文；
+  \item SAB 同步后，GCI/TCI 事件进入本模块条件分支（RTT 资源 / FLAG 激活 / 角度资源）；
+  \item 本模块经回调请求 PMS 发收，并从 6.5.5 取回测量量；
+  \item 报告 IE 交 MAC；解算节点调用坐标闭合接口输出位置。
+\end{enumerate}
+
+%======================================================================
+\section{关键参数与强制要求（接口层）}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{3.4cm}L{4.8cm}L{4.8cm}}
+\toprule
+\textbf{参数/要求} & \textbf{接口约束} & \textbf{标准指针} \\
+\midrule
+命名前缀 & 全部 \texttt{Slb}/\texttt{slb}，禁止混入 \texttt{Sle} & nearlink-naming \\
+物理量后缀 & \texttt{*Ms}/\texttt{*Us}/\texttt{*Hz}/\texttt{*M}/\texttt{*Dbm} & 本文档 §B3 \\
+XRC 入参 & 仅指针到\textbf{已解析}结构，禁止 raw PDU & 7.1 / 7.5 \\
+OFDM 定位能力 & 能力位为假时 RTT API 返回 \texttt{ERR\_CAP} & 6.6.2 \\
+FLAG 开测 & 无 GCI-4 激活不得产出 TX 命令 & 6.2.4.6.6 / 6.6.2.2 \\
+PMS $u$ & 与同步块 $u$ 相同则拒配 & 6.6.2.2.2 \\
+跳频 $T_{\mathrm{RF}}$ & 入参 \texttt{rfSettleTimeUs}，切跳前必须等待 & 6.6.2.3.2 \\
+坐标系 & 输出 ABS/REL 与配置一致，禁止混用 & 6.6.1 / 6.6.4 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{本节核心详解：接口合约}
+%======================================================================
+
+\subsection{命名约定（airMode = slb）}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{类别} & \textbf{规则} & \textbf{示例} \\
+\midrule
+类型 / 枚举 & \texttt{Slb} + PascalCase & \texttt{SlbPosRole} \\
+函数 & \texttt{slb} + lowerCamelCase & \texttt{slbCalculateRttDistance} \\
+字段 & lowerCamelCase + 单位后缀 & \texttt{distanceM}、\texttt{toaUs} \\
+常量 & UPPER\_SNAKE\_CASE & \texttt{SLB\_POS\_OK} \\
+目录 & \texttt{nearlink/slb/pos/} & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{禁用}：\texttt{masterNode}/\texttt{slaveNode}/\texttt{downlink}/\texttt{uplink}；统一使用 \texttt{gNode}/\texttt{tNode}/\texttt{gLink}/\texttt{tLink}。
+\textbf{禁用}对外 API 中的模糊名：\texttt{data}/\texttt{info}/\texttt{tmp}/\texttt{flag}/\texttt{res}。
+
+\subsection{公共类型（P0，必须先暴露）}
+
+\begin{lstlisting}[language=C,caption={P0 公共类型（精简）}]
+typedef enum {
+  SLB_POS_ROLE_ANCHOR = 0,
+  SLB_POS_ROLE_TAG,
+  SLB_POS_ROLE_FIX_NODE
+} SlbPosRole;
+
+typedef enum {
+  SLB_POS_FRAME_ABS = 0,   /* 绝对坐标 */
+  SLB_POS_FRAME_REL        /* 相对坐标 */
+} SlbPosFrameType;
+
+typedef enum {
+  SLB_POS_OK = 0,
+  SLB_POS_ERR_PARAM = -1,
+  SLB_POS_ERR_CAP = -2,
+  SLB_POS_ERR_TIMING = -3,
+  SLB_POS_ERR_GROUP = -4,
+  SLB_POS_ERR_INCOMPLETE = -5,
+  SLB_POS_ERR_NOT_READY = -6
+} SlbPosStatus;
+
+typedef struct {
+  uint16_t phyId;
+  SlbPosRole role;
+  double   anchorXyzM[3];   /* 锚点已知坐标，单位 m；标签可忽略 */
+  bool     hasAnchorCoord;
+} SlbPosNodeConfig;
+
+typedef struct {
+  uint16_t localPhyId;
+  bool     ofdmPositioningCapable;
+  uint8_t  nodeCount;
+  const SlbPosNodeConfig *nodes;
+  SlbPosFrameType frameType;
+  uint16_t fixNodePhyId;    /* 解算节点 PhyID */
+} SlbPosContext;
+\end{lstlisting}
+
+\subsection{本模块对外暴露 API（按包）}
+
+\subsubsection{P1 配置应用（6.6.1）}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{4.2cm}L{4.0cm}L{5.0cm}}
+\toprule
+\textbf{函数} & \textbf{关键入参} & \textbf{输出 / 副作用} \\
+\midrule
+\texttt{slbPosCreateContext} & 本地 PhyID、能力位 & 分配并初始化上下文 \\
+\texttt{slbPosApplyXrcConfig} & 已解析 XRC 结构指针 & 角色表、静态资源、可选测量项 \\
+\texttt{slbPosApplyGciResource} & 已解码 GCI 格式 0--2 & 当次 RTT/角度时频资源 \\
+\texttt{slbPosValidateConfig} & 上下文只读 & 拒配码（$u$、间隔、能力） \\
+\texttt{slbPosDestroyContext} & 上下文 & 释放 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{入参谨慎点}：\texttt{slbPosApplyXrcConfig} 只接受高层解析后的字段子集（角色、组播、PMS 静态参数、测量项开关、上报目标），\textbf{不}接受 \texttt{uint8\_t *asn1Bytes}。
+
+\subsubsection{P2 RTT（6.6.2.1）}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{4.4cm}L{4.0cm}L{4.8cm}}
+\toprule
+\textbf{函数} & \textbf{关键入参} & \textbf{输出} \\
+\midrule
+\texttt{slbPosBuildRttAirPlan} & 上下文 + 两/三信号模式 & \texttt{SlbPosAirCommand[]} \\
+\texttt{slbPosOnToaTodSample} & $t_1$--$t_6$（\texttt{Us}） & 更新会话测量缓冲 \\
+\texttt{slbCalculateRttDistance} & $T_a$--$T_d$（\texttt{Us}）、模式 & \texttt{distanceM} \\
+\texttt{slbPosBuildTimeDiffIe} & 本地时间差 & \texttt{SlbPosReportIe} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{lstlisting}[language=C,caption={RTT 距离计算接口}]
+typedef enum { SLB_POS_RTT_TWO_SIG = 0, SLB_POS_RTT_THREE_SIG } SlbPosRttMode;
+
+typedef struct {
+  SlbPosRttMode mode;
+  double taUs, tbUs, tcUs, tdUs; /* 未用置 NaN */
+  double speedOfLightMps;      /* 默认 299792458.0 */
+} SlbPosRttInput;
+
+int32_t slbCalculateRttDistance(const SlbPosRttInput *input,
+                                double *distanceM);
+\end{lstlisting}
+
+\subsubsection{P3 FLAG（6.6.2.2）}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{4.6cm}L{4.2cm}L{4.4cm}}
+\toprule
+\textbf{函数} & \textbf{关键入参} & \textbf{输出} \\
+\midrule
+\texttt{slbPosSetupMeasGroup} & 组 ID、PhyID 序、位图、模式 & 校验结果；写入组上下文 \\
+\texttt{slbPosOnGciFormat4} & 组 ID、激活位、报告调度 bit & 是否允许发 PMS \\
+\texttt{slbPosSelectNextTxPhyId} & 组上下文、当前轮次条件 & 下一 \texttt{phyId} 或结束 \\
+\texttt{slbPosBuildFlagAirPlan} & 组上下文 + 同步标志 & TX/RX 命令序列 \\
+\texttt{slbPosCollectToaSet} & 多锚点 TOA（\texttt{Us}） & TDOA 输入集 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{暴露边界}：不对外导出 \texttt{ACTIVE/IDLE/...} 状态枚举作控制入口；调用方只传\textbf{事件}（建组消息、GCI-4、SAB 完成、符号到期），由函数内条件判断是否产出命令。
+
+\subsubsection{P4 跳频复合（6.6.2.3 + 附录 L）}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{5.0cm}L{4.0cm}L{4.2cm}}
+\toprule
+\textbf{函数} & \textbf{关键入参} & \textbf{输出} \\
+\midrule
+\texttt{slbPosApplyHopConfig} & 图案、\texttt{rfSettleTimeUs}、$P$ & 跳频上下文 \\
+\texttt{slbPosAdvanceHopIndex} & 当前索引、LBT 超时否 & 下一信道索引 / 完成 \\
+\texttt{slbCalculateCompositeCsi} & 两端 CSI IQ[] & $H^{2W}$ \\
+\texttt{slbStitchHoppedCompositeCsi} & 各跳 $H^{2W}$ + \texttt{freqHz[]} & 等效大带宽 CSI \\
+\texttt{slbEstimateDistanceFromCompositeCsi} & 复合 CSI & \texttt{distanceM} \\
+\texttt{slbResolveHopRangingDistance} & 各跳双边 CSI & \texttt{distanceM} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{P5 角度（6.6.3）}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{4.4cm}L{4.2cm}L{4.6cm}}
+\toprule
+\textbf{函数} & \textbf{关键入参} & \textbf{输出} \\
+\midrule
+\texttt{slbPosBuildAoaAirPlan} & 标签发 / 锚点收资源 & TX/RX 命令 \\
+\texttt{slbPosBuildAodAirPlan} & 锚点发 / 标签收资源 & TX/RX 命令 \\
+\texttt{slbPosOnAoaEstimate} & 水平角/垂直角（度） & 角度 IE \\
+\texttt{slbPosOnAodBeamIndex} & 匹配波束序号 & AoD IE \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent 角度\textbf{物理估计}不在本模块：调用外部 \texttt{slbEstimateAoa}（6.5.5.8）；本模块只编排与封装。
+
+\subsubsection{P6 坐标解算（6.6.4）}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{4.4cm}L{4.2cm}L{4.6cm}}
+\toprule
+\textbf{函数} & \textbf{关键入参} & \textbf{输出} \\
+\midrule
+\texttt{slbPosFixApplyConfig} & 锚点坐标表、ABS/REL、路径模式 & 解算上下文 \\
+\texttt{slbPosFixIngestMeasSet} & 带 PhyID 的 $D$/AoA/AoD/TOA & 测量集缓存 \\
+\texttt{slbPosFixComputeTag} & 路径模式（SA/SD/MA/...） & \texttt{SlbPosFixResult} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{lstlisting}[language=C,caption={坐标解算结果}]
+typedef struct {
+  double xM, yM, zM;
+  SlbPosFrameType frameType;
+  int32_t status;           /* OK / INCOMPLETE / DIVERGED */
+  uint8_t usedAnchorCount;
+} SlbPosFixResult;
+\end{lstlisting}
+
+\subsubsection{P7 报告适配}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{4.6cm}L{4.2cm}L{4.4cm}}
+\toprule
+\textbf{函数} & \textbf{入参} & \textbf{输出} \\
+\midrule
+\texttt{slbPosBuildTimeDiffIe} & $T_a$--$T_d$ & 时间差报告 IE \\
+\texttt{slbPosBuildToaIe} & TOA 集合 & TOA 报告 IE \\
+\texttt{slbPosBuildCsiFeedbackIe} & 全/部分 CSI、$P$ & CSI 反馈 IE \\
+\texttt{slbPosBuildAngleIe} & AoA/AoD 字段 & 角度报告 IE \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{不暴露}：MAC PDU 组包、HARQ、重传——由第 7 章 / MAC 完成。
+
+\subsection{必须调用的外部接口（依赖合约）}
+
+下列函数\textbf{不属于} 6.6 包实现，但 6.6 编排层在对应步骤\textbf{必须调用}。实现联调时以各章节技术文档为准；此处固定\textbf{符号名与入出方向}，避免耦合漂移。
+
+\subsubsection{6.2.3.9 PMS}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{4.6cm}L{4.0cm}L{4.6cm}}
+\toprule
+\textbf{外部函数} & \textbf{本模块何时调用} & \textbf{取回} \\
+\midrule
+\texttt{slbGeneratePmsSequence} & 构建 TX 命令前 & 频域序列缓冲 \\
+\texttt{slbMapPmsToResourceGrid} & 发信符号映射 & 映射成功/失败 \\
+\texttt{slbGenerateSecurePmsSequence} & 安全 PMS 开关开启 & 安全序列 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{6.2.4 GCI/TCI}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{4.6cm}L{4.0cm}L{4.6cm}}
+\toprule
+\textbf{外部函数} & \textbf{本模块何时调用} & \textbf{取回} \\
+\midrule
+\texttt{slbDecodeGciPosResource} & 收到 GCI 比特域 & 格式 0--3 资源/激活结构 \\
+\texttt{slbEncodeGciPosFormat4} & G 侧下发激活 & 第四格式比特 \\
+\texttt{slbDecodeTciPosResource} & 类型 2 报告资源 & TCI 报告时频 \\
+\texttt{slbEncodeTciPosResource} & 第一锚点发 TCI & TCI 比特 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{6.5.5 测量量}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{4.8cm}L{3.8cm}L{4.6cm}}
+\toprule
+\textbf{外部函数} & \textbf{场景} & \textbf{取回} \\
+\midrule
+\texttt{slbEstimatePmsCsi} & 跳频 / 复合测距 & 每 tone IQ CSI \\
+\texttt{slbEstimateToaTod} & RTT / FLAG & \texttt{toaUs}/\texttt{todUs} \\
+\texttt{slbEstimateAoa} & 6.6.3.1 & 水平角/垂直角（度） \\
+\texttt{slbMatchAodBeamIndex} & 6.6.3.2 & 波束序号 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{第 7 章 / MAC（非 PHY 实现，但合约固定）}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{4.6cm}L{4.0cm}L{4.6cm}}
+\toprule
+\textbf{外部接口} & \textbf{方向} & \textbf{说明} \\
+\midrule
+\texttt{nlParseXrcSetup} 等 & MAC$\rightarrow$本模块 & 仅交付解析结构 \\
+\texttt{nlSendMeasReportPdu} & 本模块 IE$\rightarrow$MAC & MAC 负责 PER 封装发送 \\
+\texttt{nlQueryPositioningCapability} & 启动前 & OFDM 定位 / AoA / 跳频能力位 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent 高层共用前缀使用 \texttt{nl}/\texttt{NearLink}（airMode=\texttt{common}），与 PHY \texttt{slb} 前缀分离，避免层间命名污染。
+
+\subsection{调度器回调（本模块注册，外部实现）}
+
+\begin{lstlisting}[language=C,caption={空口命令回调（外部实现，本模块调用）}]
+typedef struct {
+  uint16_t symbolIndex;     /* 零基符号索引 */
+  uint16_t startSubcarrierIndex;
+  uint8_t  antennaPort;
+  uint8_t  beamIndex;
+  bool     isTx;            /* true=发 PMS，false=收 */
+  uint16_t targetPhyId;
+} SlbPosAirCommand;
+
+typedef int32_t (*SlbPosAirCommandFn)(const SlbPosAirCommand *cmd,
+                                      void *userCtx);
+typedef int32_t (*SlbPosReportIeFn)(const void *reportIe,
+                                    size_t lengthBytes,
+                                    void *userCtx);
+
+typedef struct {
+  SlbPosAirCommandFn onAirCommand;
+  SlbPosReportIeFn   onReportIe;
+  void *userCtx;
+} SlbPosHostHooks;
+
+int32_t slbPosRegisterHostHooks(SlbPosContext *ctx,
+                                const SlbPosHostHooks *hooks);
+\end{lstlisting}
+
+\textbf{谨慎点}：回调内禁止再入配置销毁；\texttt{userCtx} 由宿主管理生命周期。
+
+%======================================================================
+\section{数据类型、长度与维度}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{3.4cm}L{2.4cm}L{2.8cm}L{4.6cm}}
+\toprule
+\textbf{对象} & \textbf{建议类型} & \textbf{维度/单位} & \textbf{备注} \\
+\midrule
+\texttt{phyId} & \texttt{uint16\_t} & 标量 & 成员标识 \\
+\texttt{toaUs}/\texttt{todUs} & \texttt{double} & $\mu$s & 相对本地参考 \\
+\texttt{taUs}--\texttt{tdUs} & \texttt{double} & $\mu$s & RTT 时间差 \\
+\texttt{distanceM} & \texttt{double} & m & 点对点距离 \\
+\texttt{csiIq[]} & complex & 每 tone 1 IQ & 全反馈 160；不含 DC \\
+\texttt{freqHz[]} & \texttt{double} & Hz & 跳频拼接频率轴 \\
+\texttt{rfSettleTimeUs} & \texttt{uint32\_t} & $\mu$s & $T_{\mathrm{RF}}$ \\
+\texttt{azimuthDeg} & \texttt{double} & deg $[0,360)$ & AoA 水平角 \\
+\texttt{zenithDeg} & \texttt{double} & deg $[0,180]$ & AoA 垂直角 \\
+\texttt{xyzM[3]} & \texttt{double} & m & 坐标 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{时序关系与触发条件（条件驱动）}
+%======================================================================
+
+\textbf{【无状态机对外】}：调度器按事件调用下列入口；函数内部用显式条件决定是否产出命令或报错。
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{3.2cm}L{4.5cm}L{5.5cm}}
+\toprule
+\textbf{事件} & \textbf{调用入口} & \textbf{产出条件} \\
+\midrule
+XRC 解析完成 & \texttt{slbPosApplyXrcConfig} & 字段齐套且能力允许 \\
+GCI 格式 0--2 & \texttt{slbPosApplyGciResource} + \texttt{slbPosBuildRttAirPlan} & 资源合法 \\
+GCI 格式 4 & \texttt{slbPosOnGciFormat4} & 组已建立且 \texttt{isSynced} \\
+SAB 完成 & 置位同步标志后允许激活 & FLAG 开测前置 \\
+符号边界 & \texttt{slbPosSelectNextTxPhyId} & 激活位为真且轮次未完成 \\
+TOA/TOD 就绪 & \texttt{slbPosOnToaTodSample} & 时间戳有效 \\
+CSI 齐套 & \texttt{slbResolveHopRangingDistance} & 双边 tone 对齐 \\
+测量汇聚齐 & \texttt{slbPosFixComputeTag} & 路径所需输入齐全 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{处理步骤（集成流水线）}
+%======================================================================
+
+\begin{enumerate}[nosep]
+  \item \textbf{Step 1}：宿主实现 \texttt{SlbPosHostHooks}，注册回调；
+  \item \textbf{Step 2}：调用 \texttt{slbPosCreateContext} + 能力查询结果；
+  \item \textbf{Step 3}：MAC 解析 XRC 后调用 \texttt{slbPosApplyXrcConfig}；\texttt{slbPosValidateConfig}；
+  \item \textbf{Step 4}：按方式分支——RTT / FLAG / 跳频 / 角度——调用对应 \texttt{Build*AirPlan}；
+  \item \textbf{Step 5}：回调触发空口；外部 \texttt{slbEstimate*} 回填测量量；
+  \item \textbf{Step 6}：\texttt{slbPosBuild*Ie} $\rightarrow$ MAC 发送；解算节点 \texttt{slbPosFixComputeTag}；
+  \item \textbf{Step 7}：会话结束 \texttt{slbPosDestroyContext}（或复用上下文仅清测量缓冲）。
+\end{enumerate}
+
+\subsection{跨模块调用一览（必读）}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{2.4cm}L{4.4cm}L{6.4cm}}
+\toprule
+\textbf{本模块步骤} & \textbf{调用外部} & \textbf{目的} \\
+\midrule
+配资源 / 激活 & \texttt{slbDecodeGciPosResource} & 解析格式 0--3 \\
+准备发 PMS & \texttt{slbGeneratePmsSequence} + \texttt{slbMapPmsToResourceGrid} & 波形就绪 \\
+收 PMS 后 & \texttt{slbEstimateToaTod} / \texttt{slbEstimatePmsCsi} / \texttt{slbEstimateAoa} & 取测量量 \\
+类型 2 报告 & \texttt{slbEncodeTciPosResource} & 第一锚点分配报告资源 \\
+上报 & \texttt{nlSendMeasReportPdu} & MAC 封装发送 \\
+跳频复合 & \texttt{slbCalculateCompositeCsi} 等（可同库） & 附录 L 解距 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{约束与实现要点}
+%======================================================================
+
+\begin{enumerate}[nosep]
+  \item \textbf{【无状态机】}：对外 API 以事件/条件入参驱动；禁止把 IDLE/WORK/DONE 跳转表作为宿主控制面。
+  \item \textbf{【分层】}：禁止 PHY 组 XRC ASN.1；禁止 6.6 直接操作 RF 寄存器。
+  \item \textbf{【最小暴露】}：宿主只依赖 \texttt{slb\_pos\_api.h}（或 \texttt{slb-pos-api.h}）中声明的符号；内部 \texttt{ctx->} 字段不入公共头。
+  \item \textbf{【单位】}：时间统一 $\mu$s 字段名 \texttt{*Us}；距离 \texttt{*M}；角度 \texttt{*Deg}；频率 \texttt{*Hz}。
+  \item \textbf{【能力门闩】}：无 OFDM 定位能力时，RTT/FLAG/跳频入口一律 \texttt{SLB\_POS\_ERR\_CAP}。
+  \item \textbf{【激活门闩】}：FLAG 在 GCI-4 激活前，\texttt{BuildFlagAirPlan} 不得返回 TX 命令。
+  \item \textbf{【顺序】}：PhyID 发信序与报告序不得由本模块重排。
+  \item \textbf{【单锚闭合】}：6.6.4.1 路径必须同时具备角度与距离 IE，缺一返回 \texttt{ERR\_INCOMPLETE}。
+  \item \textbf{【命名隔离】}：本包仅 \texttt{slbPos*}；不得出现 \texttt{sle*} 或通用无线同义词替换 gNode/tNode。
+  \item \textbf{【回调安全】}：\texttt{onAirCommand} 失败则中止当次计划并上送错误，不静默重试无限次。
+  \item \textbf{【缓冲所有权】}：IE 缓冲由调用方提供或由约定分配器分配；API 文档须写明 free 责任。
+  \item \textbf{【跳频 TRF】}：\texttt{slbPosAdvanceHopIndex} 在未满足 \texttt{rfSettleTimeUs} 时返回 \texttt{ERR\_NOT\_READY}。
+\end{enumerate}
+
+%======================================================================
+\section{与标准其他章节的衔接}
+%======================================================================
+
+\begin{itemize}[nosep]
+  \item 角色与汇聚语义 $\leftarrow$ 6.6.1；信令承载 $\leftarrow$ 第 7 章；
+  \item 空口资源 $\leftarrow$ 6.2.4；波形 $\leftarrow$ 6.2.3.9；测量量 $\leftarrow$ 6.5.5.6--6.5.5.8；
+  \item 距离/FLAG/跳频流程细节 $\leftarrow$ 既有 6.6.2 端到端技术文档；
+  \item 角度流程 $\leftarrow$ 6.6.3 技术文档；坐标路径 $\leftarrow$ 6.6.4 技术文档；
+  \item 复合 CSI 内核 $\leftarrow$ 附录 L 技术文档（函数名与本文 P4 对齐）。
+\end{itemize}
+
+\subsection{建议头文件与依赖}
+
+\begin{lstlisting}[language=C,caption={公共头依赖（示意）}]
+/* nearlink/slb/pos/slb-pos-api.h */
+#include "nearlink/slb/pms/slb-pms-api.h"       /* 6.2.3.9 */
+#include "nearlink/slb/gci/slb-gci-pos-api.h"   /* 6.2.4 */
+#include "nearlink/slb/meas/slb-meas-api.h"     /* 6.5.5.6-8 */
+#include "nearlink/common/nl-xrc-types.h"       /* 第 7 章解析结果类型 */
+
+/* 宿主链接时还需提供: nlSendMeasReportPdu / 能力查询 */
+\end{lstlisting}
+
+\subsection{nearlink-naming 自检清单}
+
+\begin{enumerate}[nosep]
+  \item airMode 已固定为 \texttt{slb}；
+  \item 前缀仅 \texttt{Slb}/\texttt{slb}（高层 common 用 \texttt{nl}）；
+  \item 协议词使用 gNode/tNode/gLink/tLink/sab/gci/tci/pms/csi；
+  \item 单位后缀齐全；
+  \item 短变量仅限公式局部；
+  \item 动词取自 generate/map/encode/decode/parse/build/calculate/estimate/detect/validate/schedule/select。
+\end{enumerate}
+
+\vfill
+\begin{center}
+\small\textcolor{gray}{—— 接口合约依据 T/XS 10001-2025 第 6.6 节及依赖章整理；\\
+精确字段与比特布局以正式标准为准；本文档供 6.6 模块联调与 vibecoding 边界约束 ——}
+\end{center}
+
+\end{document}
