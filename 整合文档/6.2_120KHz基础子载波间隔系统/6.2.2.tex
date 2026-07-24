@@ -8,9 +8,12 @@
 \usepackage{enumitem}
 \usepackage{xcolor}
 \usepackage{longtable}
+\usepackage{array}
 
 \geometry{left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm}
 \hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue}
+
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
 
 \title{%
   \textbf{星闪 SLB 物理层}\\[0.4em]
@@ -20,7 +23,7 @@
 \author{依据 T/XS 10001-2025《星闪无线通信系统 接入层\\
 同步低时延宽带空口 SLB 技术要求和测试方法》整理\\
 （团体标准 20250326 版）}
-\date{2026 年 6 月 22 日}
+\date{2026 年 7 月 24 日}
 
 \begin{document}
 \maketitle
@@ -33,403 +36,662 @@
 
 \section{文档范围与模块划分}
 
-本文档对应 SLB 120\,kHz 物理层协议第 6.2.2 节``基础帧结构和物理资源''，涵盖 6.2.2.1\textasciitilde 6.2.2.10 全部子节，为帧结构解析、RE 映射、多载波配置及通信域/直通链路资源组织提供工程实现与联调参考。
+本文档对应 SLB 120\,kHz 物理层协议第 6.2.2 节``基础帧结构和物理资源''，涵盖 6.2.2.1\textasciitilde 6.2.2.10 全部子节。该节在 6.2.1 内容分类之上，定义 120\,kHz CP-OFDM 系统的\textbf{时频资源坐标系}——波形参数、帧层次、COT/TTI、载波结构、RE 索引及通信域/直通链路资源边界，是 6.2.3\textasciitilde 6.2.5 进行信号/控制/数据映射的前置基础。
 
-\begin{table}[h]
-\centering
-\small
-\begin{tabular}{ll}
+\begin{longtable}{L{2.2cm}L{4.8cm}L{6.5cm}}
+\caption{文档范围与模块划分} \\
 \toprule
-\textbf{子节} & \textbf{内容} \\
+\textbf{子节号} & \textbf{子节主题} & \textbf{核心输出/行为} \\
 \midrule
-6.2.2.1 & CP-OFDM 波形与五种符号类型（表 1） \\
-6.2.2.2 & 超帧/无线帧、G/T/A/D 符号配置（表 2、表 3） \\
-6.2.2.3 & 信道占用时间 COT 与传输时间间隔 TTI \\
-6.2.2.4 & 基础信道/载波、节点工作信道/载波/子载波组（表 4） \\
-6.2.2.5 & 天线端口定义 \\
-6.2.2.6 & 资源网格 \\
-6.2.2.7 & 资源元素 RE \\
-6.2.2.8 & 通信域 \\
-6.2.2.9 & G 链路、T 链路、附链路 \\
-6.2.2.10 & 直通链路 \\
+6.2.2.1 & CP-OFDM 波形与五种符号类型 & $\Delta f$、CP/GAP 长度、边界符号规则 \\
+6.2.2.2 & 超帧/无线帧与链路符号 & 1\,ms 超帧、$N_{\mathrm{sym}}^{\mathrm{frame}}$、G/T/A/D 符号配置 \\
+6.2.2.3 & COT 与 TTI & 占信道时长、$2^{N_{\mathrm{TTI}}}$ 无线帧块、链路时分规则 \\
+6.2.2.4 & 信道与载波 & 20\,MHz 基础信道、161 子载波、$N_{\mathrm{CH}}$/$L_{\mathrm{CH}}$ \\
+6.2.2.5 & 天线端口 & 逻辑端口定义；SAB/G-PCIB/广播同端口 \\
+6.2.2.6 & 资源网格 & $161 \times N_{\mathrm{sym}}^{\mathrm{frame}}$ 时频平面 \\
+6.2.2.7 & 资源元素 RE & $(k,l)_p$ 索引、$a_{k,l}$ 映射、DC/空闲约束 \\
+6.2.2.8 & 通信域 & G 节点工作载波上的可调度资源集合 \\
+6.2.2.9 & G/T/附链路 & 通信域内三条逻辑链路的方向与符号类型 \\
+6.2.2.10 & 直通链路 & 竞争获取的 D 符号资源；先发/后发节点 \\
 \bottomrule
-\end{tabular}
-\end{table}
+\end{longtable}
 
-\section{与 6.2.1 的关系}
+\section{与相关章节的关系}
 
-6.2.1 定义物理层内容分类（信号/控制/数据/PIB）；6.2.2 在 120\,kHz SCS 下给出\textbf{时频资源坐标系}——波形参数、帧层次、载波结构、RE 索引及通信域/直通链路资源边界，是 6.2.3\textasciitilde 6.2.5 进行信号/控制/数据映射的前置基础。
+\begin{longtable}{L{2.2cm}L{2.2cm}L{9.1cm}}
+\caption{与相关章节的关系} \\
+\toprule
+\textbf{相关节号} & \textbf{关系} & \textbf{说明} \\
+\midrule
+6.1 & 上游 & $T_s$、$f_s$、比特序约定；CP-OFDM 波形总体框架 \\
+6.2.1 & 上游 & 信号/控制/数据/PIB 分类；6.2.2 提供映射坐标 \\
+6.2.3 & 下游 & FTS/STS、DMRS 等在 RE $(k,l)$ 上的映射 \\
+6.2.4/6.2.5 & 下游 & SAB/RAB/G-PCIB 块内符号 \#3/\#5 等索引依赖帧结构 \\
+6.2.9/6.2.10 & 下游 & OFDM 合成与射频发射使用符号时长与 CP 参数 \\
+6.5.3 & 下游 & 符号号 $l$ 与循环前缀类型 $N_{\mathrm{CP}}$ 依赖符号类型与边界 CP 配置 \\
+8.3 & 上游 & 基础信道中心频率与多载波频域布局 \\
+6.3 & 平行 & 灵活带宽在相同帧结构上的 $\alpha$ 缩放 \\
+\bottomrule
+\end{longtable}
 
 \section{基本时间与频率量}
 
-\begin{table}[h]
-\centering
-\begin{tabular}{lll}
+\begin{longtable}{llll}
+\caption{基本时间与频率量} \\
 \toprule
-\textbf{基本量} & \textbf{定义} & \textbf{数值} \\
+\textbf{基本量} & \textbf{定义/公式} & \textbf{数值} & \textbf{标准条款} \\
 \midrule
-基准频率 $f_s$ & 物理层采样/定时基准 & 30.72\,MHz \\
-基本时间单位 $T_s$ & $T_s = 1/f_s$ & $\approx 32.55$\,ns \\
-子载波间隔 $\Delta f$ & $\Delta f = f_s/256$ & 120\,kHz \\
-OFDM 有效部分 & 不含 CP 的数据段 & $256 \times T_s \approx 8.333$\,$\mu$s \\
-超帧时长 $T_f$ & $30720 \times T_s$ & 1\,ms \\
+基准频率 $f_s$ & 物理层采样/定时基准 & 30.72\,MHz & 6.1 \\
+基本时间单位 $T_s$ & $T_s = 1/f_s$ & $\approx 32.55$\,ns & 6.1 \\
+子载波间隔 $\Delta f$ & $\Delta f = f_s/256$ & 120\,kHz & 6.2.2.1 \\
+OFDM 有效部分 & 不含 CP 的数据段 & $256 T_s \approx 8.333$\,$\mu$s & 6.2.2.1 \\
+超帧时长 $T_f$ & $T_f = 30720 \times T_s$ & 1\,ms & 6.2.2.2 \\
 \bottomrule
-\end{tabular}
-\end{table}
+\end{longtable}
 
 \newpage
 %======================================================================
-\part{6.2.2 基础帧结构和物理资源}
+\part{6.2.2 基础帧结构和物理资源（工程解读）}
 %======================================================================
 
 \section{协议章节对应}
 
-本节对应 T/XS 10001-2025 第 6.2.2 节，完整涵盖 6.2.2.1\textasciitilde 6.2.2.10 共 10 个子节。
+本节对应 T/XS 10001-2025 第 6.2 章第 6.2.2 节``基础帧结构和物理资源''，完整涵盖 6.2.2.1\textasciitilde 6.2.2.10 共 10 个子节。
 
 \section{功能定义}
 
 6.2.2 的核心功能为：定义 120\,kHz CP-OFDM 系统的\textbf{时频资源框架}，使发送/接收端能够：
 \begin{enumerate}[nosep]
-  \item 按符号类型确定 CP 长度与每无线帧符号数；
-  \item 在超帧/无线帧/符号三级时间轴上定位 PIB 与业务资源；
-  \item 在 161 子载波 $\times$ $N_{\mathrm{sym}}^{\mathrm{frame}}$ 资源网格上索引 RE $(k,l)_p$；
-  \item 区分通信域（G/T/A 符号 + G 节点工作载波）与直通链路（D 符号 + 竞争获取）。
+  \item \textbf{确定符号物理参数}：按符号类型查表~\ref{tab:622-symbol-design} 获取 CP/GAP 长度与符号总时长；
+  \item \textbf{定位时间资源}：在超帧/无线帧/符号三级时间轴上索引 PIB 与业务资源；
+  \item \textbf{索引频域资源}：在节点工作载波上按 $k$、子载波组、工作子载波组编号；
+  \item \textbf{映射 RE}：在 $161 \times N_{\mathrm{sym}}^{\mathrm{frame}}$ 资源网格上以 $(k,l)_p$ 写入 $a_{k,l}$；
+  \item \textbf{区分域与链路}：通信域（G/T/A 符号）与直通链路（D 符号）及 COT/TTI 占用规则。
 \end{enumerate}
 
 \section{模块边界（上下游及职责划分）}
 
 \subsection{上游模块}
 
-\begin{table}[h]
-\centering
-\small
-\begin{tabular}{p{4cm}p{4.5cm}p{5.5cm}}
+\begin{longtable}{L{4cm}L{4.5cm}L{5.5cm}}
+\caption{上游模块输入} \\
 \toprule
 \textbf{上游} & \textbf{输入} & \textbf{说明} \\
 \midrule
 6.1 物理层一般描述 & $T_s$、$f_s$、比特顺序约定 & 全局 PHY 基准 \\
-高层/MAC 配置 & 符号类型、$N_{\mathrm{TTI}}$、$N_{\mathrm{CH}}$、$L_{\mathrm{CH}}$ & 帧与带宽配置 \\
+高层/MAC 配置 & 符号类型、$N_{\mathrm{TTI}}$、$N_{\mathrm{CH}}$、$L_{\mathrm{CH}}$ & 帧长与带宽配置 \\
 8.3 信道号与中心频率 & 基础信道中心频率 & 多载波频域布局 \\
 \bottomrule
-\end{tabular}
-\end{table}
+\end{longtable}
 
 \subsection{下游模块}
 
-\begin{table}[h]
-\centering
-\small
-\begin{tabular}{p{4cm}p{4.5cm}p{5.5cm}}
+\begin{longtable}{L{4cm}L{4.5cm}L{5.5cm}}
+\caption{下游模块输出} \\
 \toprule
-\textbf{下游} & \textbf{本模块输出} & \textbf{说明} \\
+\textbf{下游} & \textbf{输出} & \textbf{说明} \\
 \midrule
-6.2.3 物理层信号 & RE $(k,l)$ 时频位置 & FTS/STS、DMRS、CSI-RS 等 \\
-6.2.4/6.2.5 控制/数据 & 资源网格映射规则 & PIB 块内 RE 分配 \\
-6.2.9 基带信号生成 & 符号时长与 CP 参数 & OFDM 调制链 \\
+6.2.3 物理层信号 & RE $(k,l)$ 时频位置 & FTS/STS、DMRS、CSI-RS 等映射基准 \\
+6.2.4/6.2.5 控制/数据 & 资源网格与符号 \# 索引 & PIB 块内 RE 分配 \\
+6.2.9 基带信号生成 & 符号时长与 CP 参数 & OFDM 调制链输入 \\
 6.5.3 QPSK 序列 & $n$、$l$、$N_{\mathrm{ID}}$、$N_{\mathrm{CP}}$ & 符号号 $l$ 与 CP 类型对应 \\
 \bottomrule
-\end{tabular}
-\end{table}
+\end{longtable}
 
 \subsection{本模块不负责的内容}
 
-波形调制算法（6.2.9/6.2.10）、具体 PIB 比特字段（6.2.4）、信号序列生成（6.2.3）、信道编码（6.2.6）及射频指标（第 8 章）。
+\begin{itemize}[nosep]
+  \item 波形调制算法（6.2.9/6.2.10）；
+  \item 具体 PIB 比特字段（6.2.4）、信号序列生成（6.2.3）；
+  \item 信道编码（6.2.6）、射频指标（第 8 章）；
+  \item MAC 调度策略与竞争算法细节。
+\end{itemize}
 
 \section{在 SLB 通信流程中的角色}
 
-6.2.2 处于 PHY 层\textbf{资源坐标定义层}：在 6.2.1 内容分类之后、6.2.3\textasciitilde 6.2.5 具体映射之前。接收端依此完成帧同步 $\rightarrow$ 符号/子载波定位 $\rightarrow$ RE 解调。
+6.2.2 处于 PHY 层\textbf{资源坐标定义层}：在 6.2.1 内容分类之后、6.2.3\textasciitilde 6.2.5 具体映射之前。
 
-\textbf{时间轴}：超帧 (1\,ms) $\rightarrow$ 8 个无线帧 $\rightarrow$ $N_{\mathrm{sym}}^{\mathrm{frame}}$ 个符号 $\rightarrow$ RE。
+\textbf{接收端资源定位故事线：}
+\begin{enumerate}[nosep]
+  \item \textbf{帧同步}：锁定超帧/无线帧边界（依赖 6.2.3 FTS/STS，坐标系来自本节）；
+  \item \textbf{符号定时}：按符号类型与表~\ref{tab:622-boundary-cp} 区分一般/边界 CP-OFDM 符号；
+  \item \textbf{载波选择}：确定节点工作信道/载波及基础载波序号；
+  \item \textbf{RE 解调}：在 $(k,l)_p$ 上读取 $a_{k,l}$，区分 G/T/A/D 符号上下文；
+  \item \textbf{块解析}：结合 6.2.1 PIB 分类，在已定位 RE 上解析控制/数据。
+\end{enumerate}
 
-\textbf{频域轴}：节点工作信道 ($N_{\mathrm{CH}}$ 个 20\,MHz 基础信道) $\rightarrow$ 节点工作载波 $\rightarrow$ 161 子载波/基础载波 $\rightarrow$ 基础子载波组/工作子载波组。
+\textbf{坐标轴关系：}
+\begin{itemize}[nosep]
+  \item \textbf{时间轴}：超帧 (1\,ms) $\rightarrow$ 8 个无线帧 $\rightarrow$ $N_{\mathrm{sym}}^{\mathrm{frame}}$ 个符号 $\rightarrow$ RE 时域索引 $l$；
+  \item \textbf{频域轴}：节点工作信道 ($N_{\mathrm{CH}}$ 个 20\,MHz) $\rightarrow$ 节点工作载波 $\rightarrow$ 161 子载波/基础载波 $\rightarrow$ RE 频域索引 $k$。
+\end{itemize}
 
 %----------------------------------------------------------------------
-\section{强制要求与关键参数（T/XS 10001-2025 原文）}
+\section{关键参数与强制要求（提炼版）}
 %----------------------------------------------------------------------
 
-以下为标准 6.2.2 节\textbf{完整原文}（6.2.2.1\textasciitilde 6.2.2.10），与团体标准 20250326 版一致。
+\subsection{CP-OFDM 波形与符号类型（6.2.2.1）}
 
-\subsection{6.2.2.1 波形和符号}
+物理层信号、控制、数据均基于 $\Delta f = 120$\,kHz CP-OFDM 传输。有效数据段长度恒为 $256 T_s$；不含 CP 的 OFDM 符号满足 $T_{\mathrm{CP}}=0$，$T_{\mathrm{Symb}}^{\mathrm{OFDM}} = 256 T_s$。在无需区分时，OFDM 符号与 CP-OFDM 符号统称``符号''。
 
-物理层信号、物理层控制信息和物理层数据信息基于子载波间隔 $\Delta f = f_s/256 = 120$\,kHz 的 CP-OFDM 波形传输。CP-OFDM 符号在时域上包含循环前缀部分和有效数据部分，有效数据部分长度为 $256T_s$。循环前缀部分的长度、CP-OFDM 符号、切换间隔的长度如下表 1 所示：
-
-\begin{table}[h]
-\centering
-\caption{表 1\quad 120\,kHz 子载波 CP-OFDM 符号设计}
-\small
-\begin{tabular}{llllll}
+\begin{longtable}{L{1.6cm}lllll}
+\caption{120\,kHz CP-OFDM 符号设计（提炼，$T_s$ + $\mu$s）\label{tab:622-symbol-design}} \\
 \toprule
-\textbf{符号类型} & \textbf{一般 CP 长度} & \textbf{一般 CP-OFDM 符号长度} &
-\textbf{GAP1} & \textbf{边界 CP-OFDM 符号长度} & \textbf{备注} \\
+\textbf{符号类型} & \textbf{一般 CP} & \textbf{一般符号长} &
+\textbf{GAP1} & \textbf{边界符号长} & \textbf{边界符号} \\
 \midrule
-类型一 A & $18T_s$，0.586\,$\mu$s & $274T_s$，8.919\,$\mu$s &
-$20T_s$，0.651\,$\mu$s & $276T_s$，8.984\,$\mu$s & 含边界 CP 与 GAP2 \\
-类型一 B & $18T_s$，0.586\,$\mu$s & $274T_s$，8.919\,$\mu$s &
-$22T_s$，0.716\,$\mu$s & $278T_s$，9.049\,$\mu$s & 含边界 CP 与 GAP2 \\
-类型二 & $39T_s$，1.270\,$\mu$s & $295T_s$，9.603\,$\mu$s &
-$44T_s$，1.432\,$\mu$s & $300T_s$，9.766\,$\mu$s & 含边界 CP 与 GAP2 \\
-类型三 & $64T_s$，2.083\,$\mu$s & $320T_s$，10.417\,$\mu$s &
---- & --- & 无单独边界符号/GAP2 \\
-类型四 & $128T_s$，4.167\,$\mu$s & $384T_s$，12.500\,$\mu$s &
---- & --- & 无单独边界符号/GAP2 \\
+\endfirsthead
+\multicolumn{6}{c}{\small（续表）} \\
+\toprule
+\textbf{符号类型} & \textbf{一般 CP} & \textbf{一般符号长} &
+\textbf{GAP1} & \textbf{边界符号长} & \textbf{边界符号} \\
+\midrule
+\endhead
 \bottomrule
-\end{tabular}
-\end{table}
+\endfoot
+类型一 A &
+$18T_s$（0.586\,$\mu$s） &
+$274T_s$（8.919\,$\mu$s） &
+$20T_s$（0.651\,$\mu$s） &
+$276T_s$（8.984\,$\mu$s） &
+有（\#0,\#7） \\
+类型一 B &
+$18T_s$（0.586\,$\mu$s） &
+$274T_s$（8.919\,$\mu$s） &
+$22T_s$（0.716\,$\mu$s） &
+$278T_s$（9.049\,$\mu$s） &
+有（\#0） \\
+类型二 &
+$39T_s$（1.270\,$\mu$s） &
+$295T_s$（9.603\,$\mu$s） &
+$44T_s$（1.432\,$\mu$s） &
+$300T_s$（9.766\,$\mu$s） &
+有（\#0） \\
+类型三 &
+$64T_s$（2.083\,$\mu$s） &
+$320T_s$（10.417\,$\mu$s） &
+--- & --- & 无 \\
+类型四 &
+$128T_s$（4.167\,$\mu$s） &
+$384T_s$（12.500\,$\mu$s） &
+--- & --- & 无 \\
+\end{longtable}
 
-本规范中对于不包含 CP 的 OFDM 符号简称 OFDM 符号，定义 OFDM 符号的 CP 长度 $T_{\mathrm{CP}} = 0$，OFDM 符号的时间长度 $T_{\mathrm{Symb}}^{\mathrm{OFDM}} = 256 \times T_s$。在无需区分的情况下，OFDM 符号和 CP-OFDM 符号统称为符号。
+\textbf{要点}：类型一 A/B 一般 CP 相同，差异在 GAP1/边界符号长度及边界符号位置；类型三/四无单独边界符号与 GAP2 配置。
 
-\subsection{6.2.2.2 无线帧和超帧}
+\textbf{与 6.5.3 衔接}：通信域 CP-OFDM 符号类型 $\rightarrow$ $N_{\mathrm{CP}}$：类型一 A/B $\rightarrow$ 3；类型二 $\rightarrow$ 2；类型三 $\rightarrow$ 1；类型四 $\rightarrow$ 0。
 
-一个超帧的时间长度为 $T_f = 30720 \times T_s = 1$\,ms。按照时间顺序，超帧依次编号为 \#0, \#1, $\ldots$, \#65535，在 \#65535 超帧之后再次从 \#0 开始编号。
+\subsection{超帧/无线帧与符号配置（6.2.2.2）}
 
-一个超帧中包含 8 个长度相同的无线帧，按照时间从前到后的顺序依次编号为 \#0, \#1, $\ldots$, \#7。
-
-不同类型的链路使用无线帧中不同的符号。
-
-通信域中，G 链路使用的符号称为 G 符号，T 链路使用的符号称为 T 符号，附链路使用的符号称为 A 符号。通信域的一个无线帧中的符号可以灵活配置为 G 符号、T 符号、A 符号和切换间隔。
-
-直通链路使用的符号称为 D 符号。直通链路的一个无线帧中的符号可以灵活配置为 D 符号和切换间隔。
-
-一个无线帧中共包含 $N_{\mathrm{sym}}^{\mathrm{frame}}$ 个符号，依次编号为 \#0, \#1, $\ldots$, \#$N_{\mathrm{sym}}^{\mathrm{frame}} - 1$，不同符号类型对应的无线帧中符号的个数如下表 2 所示：
-
-\begin{table}[h]
-\centering
-\caption{表 2\quad 120\,kHz 子载波无线帧设计}
-\begin{tabular}{lc}
+\begin{longtable}{lll}
+\caption{超帧与无线帧关键参数} \\
 \toprule
-\textbf{符号类型} & \textbf{无线帧中包含符号的个数 $N_{\mathrm{sym}}^{\mathrm{frame}}$} \\
+\textbf{参数} & \textbf{取值/规则} & \textbf{标准条款} \\
 \midrule
-类型一 A & 14 \\
-类型一 B & 14 \\
+超帧时长 $T_f$ & $30720 T_s = 1$\,ms & 6.2.2.2 \\
+超帧编号 & \#0\textasciitilde\#65535 循环 & 6.2.2.2 \\
+每超帧无线帧数 & 8（\#0\textasciitilde\#7） & 6.2.2.2 \\
+$N_{\mathrm{sym}}^{\mathrm{frame}}$ & 类型一 A/B: 14；二: 13；三: 12；四: 10 & 表~\ref{tab:622-sym-per-frame} \\
+通信域符号 & G/T/A 符号 + 切换间隔 & 6.2.2.2 \\
+直通链路符号 & D 符号 + 切换间隔 & 6.2.2.2 \\
+\bottomrule
+\end{longtable}
+
+\begin{longtable}{lc}
+\caption{每无线帧符号数\label{tab:622-sym-per-frame}} \\
+\toprule
+\textbf{符号类型} & \textbf{$N_{\mathrm{sym}}^{\mathrm{frame}}$} \\
+\midrule
+\endfirsthead
+\multicolumn{2}{c}{\small（续表）} \\
+\toprule
+\textbf{符号类型} & \textbf{$N_{\mathrm{sym}}^{\mathrm{frame}}$} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+类型一 A / 类型一 B & 14 \\
 类型二 & 13 \\
 类型三 & 12 \\
 类型四 & 10 \\
-\bottomrule
-\end{tabular}
-\end{table}
+\end{longtable}
 
-每一个无线帧包含的符号配置如下表 3 所示：
-
-\begin{table}[h]
-\centering
-\caption{表 3\quad 无线帧符号配置}
-\small
-\begin{tabular}{llll}
+\begin{longtable}{llll}
+\caption{无线帧符号配置（边界 CP 位置）\label{tab:622-boundary-cp}} \\
 \toprule
-\textbf{符号类型} & \textbf{无线帧内符号编号和个数} &
-\textbf{一般 CP-OFDM 符号位置} & \textbf{边界 CP-OFDM 符号位置} \\
+\textbf{符号类型} & \textbf{符号数} & \textbf{一般 CP 符号 $l$} & \textbf{边界 CP 符号 $l$} \\
 \midrule
-类型一 A & \#0,\#1,\ldots,\#13，共 14 个 &
-\#1,\#2,\ldots,\#6,\#8,\#9,\ldots,\#13 & \#0,\#7 \\
-类型一 B & \#0,\#1,\ldots,\#13，共 14 个 &
-\#1,\#2,\ldots,\#13 & \#0 \\
-类型二 & \#0,\#1,\ldots,\#12，共 13 个 &
-\#1,\#2,\ldots,\#12 & \#0 \\
-类型三 & \#0,\#1,\ldots,\#11，共 12 个 &
-\#0,\#1,\ldots,\#11 & --- \\
-类型四 & \#0,\#1,\ldots,\#9，共 10 个 &
-\#0,\#1,\ldots,\#9 & --- \\
+\endfirsthead
+\multicolumn{4}{c}{\small（续表）} \\
+\toprule
+\textbf{符号类型} & \textbf{符号数} & \textbf{一般 CP 符号 $l$} & \textbf{边界 CP 符号 $l$} \\
+\midrule
+\endhead
 \bottomrule
-\end{tabular}
-\end{table}
+\endfoot
+类型一 A & 14 & \#1\textasciitilde\#6, \#8\textasciitilde\#13 & \#0, \#7 \\
+类型一 B & 14 & \#1\textasciitilde\#13 & \#0 \\
+类型二 & 13 & \#1\textasciitilde\#12 & \#0 \\
+类型三 & 12 & \#0\textasciitilde\#11 & --- \\
+类型四 & 10 & \#0\textasciitilde\#9 & --- \\
+\end{longtable}
 
-\subsection{6.2.2.3 信道占用时间 COT 和传输时间间隔 TTI}
+\subsection{COT 与 TTI（6.2.2.3）}
 
-在非连续传输模式下，通信域、直通链路以竞争抢占的方式时分使用各个基础载波。对于一次占用，从竞争信道成功后的第一个无线帧开始，到所有基础载波都释放信道之前的最后一个无线帧（含）为止，整数个无线帧组成一个信道占用时间 COT。
+\begin{longtable}{lll}
+\caption{COT 与 TTI 关键参数} \\
+\toprule
+\textbf{参数/规则} & \textbf{取值/约束} & \textbf{标准条款} \\
+\midrule
+$N_{\mathrm{TTI}}$ & 0\textasciitilde 6 & 6.2.2.3 \\
+TTI 无线帧数 & $2^{N_{\mathrm{TTI}}}$（1/2/4/8/16/32/64） & 6.2.2.3 \\
+COT 定义 & 竞争成功后首帧至释放前末帧，整数个无线帧 & 6.2.2.3 \\
+边界对齐 & COT/TTI 边界与超帧边界\textbf{无固定关系} & 6.2.2.3 \\
+通信域 TTI & 至少含 G 链路且 G 在 TTI 开头 & 6.2.2.3 \\
+链路切换 & 不同类型链路间插入 1 符号切换间隔 & 6.2.2.3 \\
+附/直通多发节点 & 不同发送节点间亦插入 1 符号切换间隔 & 6.2.2.3 \\
+TTI 末符号 & 必须为切换间隔 & 6.2.2.3 \\
+\bottomrule
+\end{longtable}
 
-在非连续传输模式下，1 个 COT 中每连续 $2^{N_{\mathrm{TTI}}}$ 个无线帧组成 1 个传输时间间隔 TTI，其中 $N_{\mathrm{TTI}} = 0, 1, \ldots, 6$。对于 1 个通信域，$N_{\mathrm{TTI}}$ 为常数，且 1 个 COT 包含整数个 TTI。COT 的边界与超帧边界没有固定关系，TTI 的边界与超帧边界没有固定关系。为了描述方便，一个 COT 内的 TTI 按照时间从前到后的顺序依次编号为 \#0, \#1, $\ldots$，称为 TTI 顺序号。
+\begin{longtable}{L{3cm}L{5.5cm}L{5.5cm}}
+\caption{连续 / 非连续传输模式对比} \\
+\toprule
+\textbf{模式} & \textbf{COT} & \textbf{TTI 与超帧} \\
+\midrule
+\endfirsthead
+\multicolumn{3}{c}{\small（续表）} \\
+\toprule
+\textbf{模式} & \textbf{COT} & \textbf{TTI 与超帧} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+非连续传输 & 竞争抢占；COT = 整数个无线帧；1 个 COT 含整数个 TTI & COT/TTI 边界与超帧\textbf{无固定}对齐 \\
+连续传输 & 无竞争 COT 概念（持续占用） & 超帧含整数个 TTI，或 1 个 TTI 含整数个超帧 \\
+\end{longtable}
 
-在连续传输模式下，每连续 $2^{N_{\mathrm{TTI}}}$ 个无线帧组成 1 个传输时间间隔 TTI，其中 $N_{\mathrm{TTI}} = 0, 1, \ldots, 6$。一个超帧包含整数个 TTI，或者 1 个 TTI 包含整数个超帧。
+\subsection{信道、载波与子载波组（6.2.2.4）}
 
-通信域的一个 TTI 中包含至少 1 种类型的链路。通信域的一个 TTI 中至少包含 G 链路，并且 G 链路在 TTI 的开头。
+\begin{longtable}{lll}
+\caption{信道与载波关键参数} \\
+\toprule
+\textbf{参数} & \textbf{取值/规则} & \textbf{标准条款} \\
+\midrule
+基础信道带宽 & 20\,MHz & 6.2.2.4 \\
+每基础载波子载波数 & 161；\#80 为 DC，不映射 & 6.2.2.4 \\
+有效子载波 & 除 \#80 外均可映射 & 6.2.2.4 \\
+基础子载波组 & 每 10 个有效子载波 = 1 组，共 16 组 & 6.2.2.4 \\
+分隔子载波 & 频域相邻基础载波间，不映射 & 6.2.2.4 \\
+节点工作信道 & 连续 $N_{\mathrm{CH}}$ 个基础信道并集 & 6.2.2.4 \\
+工作子载波组编号 & \#0\textasciitilde\#$(\lfloor 16 N_{\mathrm{CH}}/L_{\mathrm{CH}} \rfloor - 1)$ & 6.2.2.4 \\
+\bottomrule
+\end{longtable}
 
-通信域的一个 TTI 中，支持链路类型以时分的方式变更，不同类型的链路之间有长度 1 个符号的切换间隔。
-
-一个 TTI 中，若包含附链路或直通链路，支持附链路或直通链路的发送节点以时分的方式变更，不同发送节点的附链路或直通链路之间有长度 1 个符号的切换间隔。
-
-一个 TTI 的最后一个符号为切换间隔。
-
-\subsection{6.2.2.4 信道和载波}
-
-基础信道的带宽是 20\,MHz。每个基础信道对应一个由 161 个连续子载波组成的基础载波。每个基础载波的 161 个子载波按照子载波中心频率从低到高的顺序依次编号为 \#0, \#1, $\ldots$, \#160，其中 \#80 子载波为中心子载波，中心子载波不映射任何数据或信号。在该 161 个连续子载波中，除中心子载波外，每连续 10 个子载波构成 1 个基础子载波组，基础子载波组按照对应频率从低到高的顺序依次编号为 \#0, \#1, $\ldots$, \#15。除中心子载波外，其它子载波可用于映射数据或信号，称为有效子载波。\#80 子载波的中心频率也称为基础信道的中心频率。每个基础信道的中心频率参考 8.3 节定义。
-
-2 个基础信道频域相邻定义为：基础信道 1 的最高频率等于基础信道 2 的最低频率，称为基础信道 1 和基础信道 2 频域相邻。对于频域相邻的 2 个基础信道，其中心频率的间隔为子载波间隔的整数倍。频域相邻的 2 个基础信道对应的 2 个基础载波之间，存在整数个子载波。该整数个子载波中每一个子载波都称为一个分隔子载波，不映射任何数据或信号。参见标准图 51。
-
-节点工作信道由连续 $N_{\mathrm{CH}}$ 个基础信道组成，为该节点传输 1 个 TB 数据的所有可用频率范围的并集，其中 $N_{\mathrm{CH}}$ 为正整数。该 $N_{\mathrm{CH}}$ 个基础信道对应的 $N_{\mathrm{CH}}$ 个基础载波组成该节点的节点工作载波。在节点工作载波上，基础子载波组按照对应频率从低到高的顺序依次编号为 \#0, \#1, $\ldots$, \#$(16 \times N_{\mathrm{CH}} - 1)$。在节点工作载波上，从 \#0 基础子载波组开始，每连续 $L_{\mathrm{CH}}$ 个基础子载波组组成一个节点工作子载波组，节点工作子载波组按照对应频率从低到高的顺序依次编号为 \#0, \#1, $\ldots$, \#$(\lfloor 16 \times N_{\mathrm{CH}} / L_{\mathrm{CH}} \rfloor - 1)$。$N_{\mathrm{CH}}$ 与 $L_{\mathrm{CH}}$ 的对应关系见表 4。
-
-\begin{table}[h]
-\centering
-\caption{表 4\quad $N_{\mathrm{CH}}$ 与 $L_{\mathrm{CH}}$ 的对应关系}
-\small
-\begin{tabular}{c*{18}{c}}
+\begin{longtable}{c*{18}{c}}
+\caption{$N_{\mathrm{CH}}$ 与 $L_{\mathrm{CH}}$ 对应关系（共 18 档）\label{tab:622-nch-lch}} \\
 \toprule
 $N_{\mathrm{CH}}$ &
 1 & 2 & 3 & 4 & 5 & 6 & 7 & 8 & 9 & 10 & 11 & 12 & 13 & 14 & 15 & 16 & 25 & 32 \\
 \midrule
+\endfirsthead
+\multicolumn{19}{c}{\small（续表）} \\
+\toprule
+$N_{\mathrm{CH}}$ &
+1 & 2 & 3 & 4 & 5 & 6 & 7 & 8 & 9 & 10 & 11 & 12 & 13 & 14 & 15 & 16 & 25 & 32 \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
 $L_{\mathrm{CH}}$ &
 1 & 2 & 4 & 4 & 8 & 8 & 8 & 8 & 16 & 16 & 16 & 16 & 16 & 16 & 16 & 16 & 32 & 32 \\
+\end{longtable}
+
+\textbf{注}：$N_{\mathrm{CH}}=25$ 时工作子载波组编号仍按 $\lfloor 16 N_{\mathrm{CH}}/L_{\mathrm{CH}} \rfloor - 1$ 取上界（向下取整）。
+
+\subsection{天线端口、资源网格与 RE（6.2.2.5\textasciitilde 6.2.2.7）}
+
+\begin{longtable}{lll}
+\caption{天线端口、资源网格与 RE} \\
+\toprule
+\textbf{对象} & \textbf{规则} & \textbf{标准条款} \\
+\midrule
+天线端口 & 同端口相邻符号信道可互推；逻辑概念非物理天线号 & 6.2.2.5 \\
+通信域同端口 & SAB、G-PCIB、广播、G-DMRS-C 同端口 & 6.2.2.5 \\
+直通同端口 & 同节点发送的控制/数据/信号同端口 & 6.2.2.5 \\
+资源网格 & 每端口 $p$、每基础载波、每无线帧：$161 \times N_{\mathrm{sym}}^{\mathrm{frame}}$ & 6.2.2.6 \\
+RE 索引 & $(k,l)_p$，$k{=}0{\ldots}160$，$l{=}0{\ldots}N_{\mathrm{sym}}^{\mathrm{frame}}{-}1$ & 6.2.2.7 \\
+DC / 空闲 & $a_{80,l}\equiv 0$；未分配 RE 映射 0 & 6.2.2.7 \\
 \bottomrule
-\end{tabular}
-\end{table}
+\end{longtable}
 
-注：$N_{\mathrm{CH}} = 25$ 时，节点工作子载波组按照对应频率从低到高的顺序依次编号为 \#0, \#1, $\ldots$, \#$(\lfloor 16 \times N_{\mathrm{CH}} / L_{\mathrm{CH}} \rfloor - 1)$，其中 $\lfloor \cdot \rfloor$ 表示向下取整。
+\subsection{通信域、三链路与直通链路（6.2.2.8\textasciitilde 6.2.2.10）}
 
-\subsection{6.2.2.5 天线端口}
+\begin{longtable}{lll}
+\caption{通信域、三链路与直通链路索引} \\
+\toprule
+\textbf{对象} & \textbf{规则} & \textbf{标准条款} \\
+\midrule
+通信域 & G 节点工作载波上 SAB、G-PCIB、广播、可调度资源的集合 & 6.2.2.8 \\
+G 链路 & G$\rightarrow$至少一个 T；使用 G 符号 & 6.2.2.9 \\
+T 链路 & T$\rightarrow$G；使用 T 符号 & 6.2.2.9 \\
+附链路 & T$\rightarrow$T 和/或 G；使用 A 符号 & 6.2.2.9 \\
+直通链路 & 竞争获取；先发/后发节点；使用 D 符号 & 6.2.2.10 \\
+\bottomrule
+\end{longtable}
 
-天线端口基于如下特征定义：天线端口上一个符号的传输信道可以推断出同一天线端口另一个符号的传输信道。
+%----------------------------------------------------------------------
+\section{本节核心详解}
+%----------------------------------------------------------------------
 
-通信域中，在同步信息块、G 链路物理层控制信息块映射物理层信号和物理层控制信息的天线端口以及传输广播信息和 G 链路公共解调参考信号的天线端口都相同。
+\subsection{6.2.2.1 CP-OFDM 波形}
 
-直通链路中，同一个节点发送的所有物理层控制信息、物理层数据信息、物理层信号的天线端口相同。
+\textbf{功能}：为全部物理层内容提供统一时域符号结构（循环前缀 + 有效数据段）。
 
-\subsection{6.2.2.6 资源网格}
+\textbf{输入/输出}：输入符号类型配置 $\rightarrow$ 输出每符号 CP 长度、GAP1、总时长、是否存在边界符号。
 
-对于每一个天线端口，每一个基础载波的每一个无线帧上可以定义一个由 161 个子载波和 $N_{\mathrm{sym}}^{\mathrm{frame}}$ 个符号构成的资源网格。
-
-\subsection{6.2.2.7 资源元素}
-
-天线端口 $p$ 的一个资源网格中的每个单元称为资源元素，在一个基础载波的一个无线帧上，每一个资源元素可以由资源网格中唯一的序号 $(k, l)_p$ 索引，其中 $k$ 和 $l$ 分别是频域和时域索引。资源元素 $(k, l)_p$ 映射一个复数值 $a_{k,l}^{(p)}$，其中 $k = 0, 1, \ldots, 160$，$l = 0, 1, \ldots, N_{\mathrm{sym}}^{\mathrm{frame}} - 1$，在不产生混淆或无需指示特定天线端口的情况下，$p$ 可以略去，即一个资源元素可以由资源网格中唯一的序号 $(k, l)$ 索引，资源元素 $(k, l)$ 映射一个复数值 $a_{k,l}$。
-
-不用于传输任何物理层信号、物理层控制信息和物理层数据信息的资源元素映射的复数值为 0。
-
-本文件中，$a_{80,l} \equiv 0$。
-
-\subsection{6.2.2.8 通信域}
-
-在一个 G 节点工作载波上，用于该 G 节点发送的同步信息块、G 链路物理层控制信息块，该 G 节点发送广播信息的资源，以及该 G 节点可以调度和配置的资源组成的资源集合称为该 G 节点的通信域，该 G 节点称为该通信域的 G 节点。
-
-\subsection{6.2.2.9 G 链路、T 链路和附链路}
-
-一个通信域由该通信域的 G 链路、该通信域的 T 链路和该通信域的附链路（Auxiliary Link）组成：
+\textbf{上下文}：
 \begin{itemize}[nosep]
-  \item 一个通信域的 G 链路定义为用于该通信域的 G 节点发送、该通信域的至少一个 T 节点接收的物理层信号、物理层控制信息和物理层数据信息的资源；
-  \item 一个通信域的 T 链路定义为用于该通信域的 T 节点发送、G 节点接收物理层信号、物理层控制信息和物理层数据信息的资源；
-  \item 一个通信域的附链路定义为用于该通信域的 T 节点发送，该通信域的至少一个 T 节点，或者该通信域的至少一个 T 节点和 G 节点接收物理层信号、物理层控制信息和物理层数据信息的资源。
+  \item 通信域/直通链路均使用 120\,kHz SCS；
+  \item 类型三/四 CP 更长，适用于更大时延扩展/覆盖场景；
+  \item 边界符号用于无线帧首尾（表~\ref{tab:622-boundary-cp}），直接影响 6.5.3 中 $N_{\mathrm{CP}}$ 查表与序列生成；
+  \item 类型一 A 的 \#7 边界符号与含 SAB 的典型 TTI 前段布局（见 6.2.1）相关。
 \end{itemize}
 
-\subsection{6.2.2.10 直通链路}
+\subsection{6.2.2.2 超帧与无线帧}
 
-节点竞争信道获取的，用于与未建立连接的节点通信的资源称为直通链路（Passthrough Link），竞争信道的节点称为直通链路的先发节点，在直通链路上与先发节点通信的其它节点称为直通链路的后发节点。直通链路用于先发节点与后发节点交互物理层信号、物理层控制信息和物理层数据信息。
+\textbf{功能}：建立周期性时间网格，承载 G/T/A/D 链路符号序列。
 
-%----------------------------------------------------------------------
-\section{CP-OFDM 波形与符号类型详解}
-%----------------------------------------------------------------------
+\textbf{输入/输出}：输入符号类型 $\rightarrow$ 输出 $N_{\mathrm{sym}}^{\mathrm{frame}}$、符号 \#0\textasciitilde\#$N{-}1$ 及一般/边界 CP 类型。
 
-CP 复制有效段尾部到符号开头，用于对抗多径时延扩展。类型一 A/B 区分在于 GAP1/GAP2 长度不同；类型二至四 CP 更长，类型三/四无单独边界符号。
+\textbf{链路符号配置}：
+\begin{itemize}[nosep]
+  \item 通信域无线帧可灵活配置为 G 符号、T 符号、A 符号与切换间隔；
+  \item 直通链路无线帧可灵活配置为 D 符号与切换间隔；
+  \item 符号编号在无线帧内连续，切换间隔占用 1 个符号槽位。
+\end{itemize}
 
-\textbf{与 6.5.3 的衔接}：通信域 CP-OFDM 符号类型与符号编号 $l$、循环前缀类型 $N_{\mathrm{CP}}$ 的对应关系见 6.5.3（类型一 A/B $\rightarrow$ $N_{\mathrm{CP}}=3$；类型二 $\rightarrow$ 2；类型三 $\rightarrow$ 1；类型四 $\rightarrow$ 0）。
+\textbf{上下文}：6.2.4 中 SAB \#0\textasciitilde\#4、广播 \#5/\#7、G-DMRS-C \#6 等符号索引均引用本节无线帧符号编号。
 
-%----------------------------------------------------------------------
-\section{超帧/无线帧与链路符号}
-%----------------------------------------------------------------------
+\subsection{6.2.2.3 COT 与 TTI}
 
-\textbf{时间结构}：超帧 (1\,ms) = 无线帧\#0 + $\cdots$ + 无线帧\#7；每无线帧 = 符号\#0 + $\cdots$ + 符号\#$(N-1)$。
+\textbf{功能}：描述一次信道占用内的传输时间块，支撑非连续/连续传输模式调度。
 
-\textbf{链路符号}：通信域无线帧内可配置 G/T/A 符号及切换间隔；直通链路配置 D 符号及切换间隔。边界 CP-OFDM 符号用于无线帧首尾等特殊位置（类型一 A 在 \#0、\#7；类型一 B 在 \#0；类型二在 \#0）。
+\textbf{输入/输出}：输入 $N_{\mathrm{TTI}}$、传输模式、COT 起止无线帧 $\rightarrow$ 输出 TTI 无线帧数、COT 内 TTI 顺序号、当前帧所属 TTI。
 
-%----------------------------------------------------------------------
-\section{COT 与 TTI 详解}
-%----------------------------------------------------------------------
+\textbf{强制结构}：
+\begin{enumerate}[nosep]
+  \item 通信域一个 TTI 至少含 G 链路，且 G 链路在 TTI 开头；
+  \item 不同类型链路之间插入长度 1 个符号的切换间隔；
+  \item 若含附链路或直通链路，不同发送节点之间亦插入 1 符号切换间隔；
+  \item 一个 TTI 的最后一个符号必须为切换间隔。
+\end{enumerate}
 
-COT/TTI 描述一次占信道后的连续占用时间，边界可与超帧不对齐。
+\textbf{上下文}：竞争接入后 COT 起始无线帧不必对齐超帧；实现调度器须支持任意无线帧边界起始的 COT/TTI。
 
-\begin{table}[h]
-\centering
-\small
-\begin{tabular}{ll}
-\toprule
-\textbf{模式} & \textbf{规则摘要} \\
-\midrule
-非连续传输 & 竞争抢占；COT = 整数个无线帧；TTI = 连续 $2^{N_{\mathrm{TTI}}}$ 个无线帧 \\
-连续传输 & 超帧与 TTI 可为整数倍包含关系 \\
-通信域 TTI & 至少含 G 链路且 G 在开头；链路间 1 符号切换间隔；末符号为切换间隔 \\
-\bottomrule
-\end{tabular}
-\end{table}
+\subsection{6.2.2.4 信道与载波}
 
-$N_{\mathrm{TTI}}$ 取值 0\textasciitilde 6，即 TTI 长度 = 1/2/4/8/16/32/64 个无线帧。
-
-%----------------------------------------------------------------------
-\section{信道、载波与子载波组}
-%----------------------------------------------------------------------
+\textbf{功能}：定义频域资源层次，支撑多载波聚合与调度资源指示。
 
 \textbf{频域结构示意}：
 \begin{itemize}[nosep]
-  \item 单基础载波：子载波 \#0$\ldots$\#79 $|$ \#80(DC) $|$ \#81$\ldots$\#160
-  \item 每 10 个有效子载波 = 1 基础子载波组，共 16 组
-  \item 多载波：基础载波 1 $|$ 分隔子载波 $\ldots$ $|$ 基础载波 2 $|$ $\ldots$
+  \item 单基础载波：\#0\textasciitilde\#79 $|$ \#80(DC) $|$ \#81\textasciitilde\#160；
+  \item 除 DC 外每连续 10 个有效子载波 = 1 个基础子载波组，共 16 组（\#0\textasciitilde\#15）；
+  \item $N_{\mathrm{CH}}$ 个基础载波聚合为节点工作载波；基础子载波组在工作载波上重新编号为 \#0\textasciitilde\#$(16N_{\mathrm{CH}}-1)$；
+  \item 从 \#0 起每连续 $L_{\mathrm{CH}}$ 个基础子载波组组成一个节点工作子载波组；
+  \item 频域相邻基础载波之间存在分隔子载波，不承载任何内容（见标准图 51）。
 \end{itemize}
 
-节点工作信道/载波/子载波组由 $N_{\mathrm{CH}}$、$L_{\mathrm{CH}}$ 决定，是 TB 频域映射与调度资源指示的基准。
+\textbf{基础子载波组索引（单载波，跳过 DC）}：有效子载波按频率从低到高编号后，组号 $= \lfloor \mathrm{有效序号}/10 \rfloor$，其中有效序号在 $k{<}80$ 时为 $k$，在 $k{>}80$ 时为 $k-1$。
 
-%----------------------------------------------------------------------
-\section{天线端口、资源网格与 RE}
-%----------------------------------------------------------------------
+\textbf{上下文}：6.2.4 DSCI 中``基础载波序号''、``工作子载波组''等字段均基于本节编号；$N_{\mathrm{CH}}$、$L_{\mathrm{CH}}$ 必须按表~\ref{tab:622-nch-lch} 配对。
 
-\textbf{天线端口}：逻辑概念（非物理天线编号）；通信域 SAB/G-PCIB/广播/G-DMRS-C 同端口；直通链路同节点发送内容同端口。
+\subsection{6.2.2.5 天线端口}
 
-\textbf{资源网格}：每端口 $p$、每基础载波、每无线帧 $\rightarrow$ $161 \times N_{\mathrm{sym}}^{\mathrm{frame}}$ RE 矩阵。
+\textbf{功能}：定义逻辑天线端口，使同端口上不同符号的信道可相互推断，支撑信道估计复用。
 
-\textbf{RE 约束}：空闲 RE 映射 0；DC 子载波 $a_{80,l} \equiv 0$ 恒成立。
+\textbf{强制同端口}：
+\begin{itemize}[nosep]
+  \item 通信域：SAB、G-PCIB 映射的信号/控制，以及广播信息与 G-DMRS-C，天线端口相同；
+  \item 直通链路：同一节点发送的全部物理层信号、控制、数据天线端口相同。
+\end{itemize}
 
-%----------------------------------------------------------------------
-\section{通信域、三链路与直通链路对比}
-%----------------------------------------------------------------------
+\subsection{6.2.2.6\textasciitilde 6.2.2.7 资源网格与 RE}
 
-\begin{table}[h]
-\centering
-\small
-\begin{tabular}{lll}
+\textbf{资源网格}：对每一个天线端口、每一个基础载波、每一个无线帧，定义 $161 \times N_{\mathrm{sym}}^{\mathrm{frame}}$ 的时频平面。
+
+\textbf{RE}：网格中每个单元为资源元素，由 $(k,l)_p$ 唯一索引，映射复数值 $a_{k,l}^{(p)}$。不产生混淆时可略去 $p$。
+
+\textbf{强制约束}：
+\begin{itemize}[nosep]
+  \item 不用于传输的 RE 映射 $a_{k,l}{=}0$；
+  \item $a_{80,l}\equiv 0$（中心子载波永不承载内容）。
+\end{itemize}
+
+\subsection{6.2.2.8 通信域}
+
+\textbf{功能}：在 G 节点工作载波上划定该 G 节点可管理的物理层资源集合，作为通信域内 G/T/附链路与 PIB 映射的资源边界。
+
+\textbf{定义}：在一个 G 节点工作载波上，下列资源组成的集合称为该 G 节点的\textbf{通信域}；拥有该通信域的 G 节点称为该通信域的 G 节点。
+
+\begin{longtable}{L{4.5cm}L{7cm}L{2.5cm}}
+\caption{通信域资源组成\label{tab:622-comm-domain}} \\
 \toprule
-\textbf{概念} & \textbf{拓扑/获取方式} & \textbf{符号类型} \\
+\textbf{资源类别} & \textbf{说明} & \textbf{典型条款} \\
 \midrule
-通信域 & G 节点工作载波；SAB/G-PCIB/可调度资源 & G/T/A 符号 \\
-G 链路 & G$\rightarrow$T（至少一个） & G 符号 \\
-T 链路 & T$\rightarrow$G & T 符号 \\
-附链路 & T$\rightarrow$T 和/或 G & A 符号 \\
-直通链路 & 竞争信道；先发/后发节点 & D 符号 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-通信域需 G 节点管理与调度；直通链路无需预先建立连接，结构精简。
-
-%----------------------------------------------------------------------
-\section{数据类型与关键参数速查}
-%----------------------------------------------------------------------
-
-\begin{table}[h]
-\centering
-\footnotesize
-\begin{tabular}{lll}
+\endfirsthead
+\multicolumn{3}{c}{\small（续表）} \\
 \toprule
-\textbf{参数} & \textbf{取值/范围} & \textbf{标准位置} \\
+\textbf{资源类别} & \textbf{说明} & \textbf{典型条款} \\
 \midrule
-$\Delta f$ & 120\,kHz & 6.2.2.1 \\
-$N_{\mathrm{sym}}^{\mathrm{frame}}$ & 10/12/13/14 & 表 2 \\
-超帧内无线帧数 & 8 & 6.2.2.2 \\
-超帧编号 & \#0$\sim$\#65535 循环 & 6.2.2.2 \\
-$N_{\mathrm{TTI}}$ & 0$\sim$6 & 6.2.2.3 \\
-基础信道带宽 & 20\,MHz & 6.2.2.4 \\
-每基础载波子载波数 & 161（\#80 DC） & 6.2.2.4 \\
-基础子载波组数/载波 & 16 & 6.2.2.4 \\
-$k$ 索引 & 0$\sim$160 & 6.2.2.7 \\
-$l$ 索引 & 0$\sim$ $N_{\mathrm{sym}}^{\mathrm{frame}}-1$ & 6.2.2.7 \\
+\endhead
 \bottomrule
-\end{tabular}
-\end{table}
+\endfoot
+同步信息块 SAB & G 节点发送的同步信号 + 同步信息 & 6.2.1、6.2.4 \\
+G 链路物理层控制信息块 G-PCIB & G 节点发送的物理层控制（调度/指示等） & 6.2.4 \\
+广播信息资源 & G 节点发送广播信息的 RE & 6.2.4 \\
+可调度/可配置资源 & G 节点可调度或配置的数据、参考信号等 RE & 6.2.3\textasciitilde 6.2.5 \\
+\end{longtable}
+
+\textbf{输入/输出}：输入 G 节点工作载波配置（$N_{\mathrm{CH}}$ 等）$\rightarrow$ 输出通信域资源范围标识（是否含 SAB/G-PCIB/广播/可调度资源）。
+
+\textbf{上下文}：
+\begin{itemize}[nosep]
+  \item 通信域建立在\textbf{节点工作载波}之上，频域边界由 6.2.2.4 决定；
+  \item 时域上由 G/T/A 符号与切换间隔组织（6.2.2.2、6.2.2.3）；
+  \item 6.2.1 中通信域 PIB（SAB、RAB、G-PCIB、A-PDIB）及散布资源均落在该集合内；
+  \item 实现时须能区分``本通信域 G 节点''与其它节点/直通链路资源，避免跨域误解析。
+\end{itemize}
+
+\subsection{6.2.2.9 G 链路、T 链路和附链路}
+
+\textbf{功能}：在同一通信域内定义三条逻辑链路，规定发送/接收方向与对应符号类型，支撑 TTI 内时分复用。
+
+一个通信域由该通信域的 \textbf{G 链路}、\textbf{T 链路}和\textbf{附链路（Auxiliary Link）}组成，均在同一 G 节点工作载波/通信域资源池内时分复用。
+
+\begin{longtable}{L{2.2cm}L{4.2cm}L{2cm}L{5cm}}
+\caption{通信域三链路定义\label{tab:622-gta-link}} \\
+\toprule
+\textbf{链路} & \textbf{方向} & \textbf{符号} & \textbf{典型用途} \\
+\midrule
+\endfirsthead
+\multicolumn{4}{c}{\small（续表）} \\
+\toprule
+\textbf{链路} & \textbf{方向} & \textbf{符号} & \textbf{典型用途} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+G 链路 & G 节点发送 $\rightarrow$ 至少一个 T 节点接收 & G 符号 & 同步、广播、G-PCIB、G 侧数据、CSI-RS 等 \\
+T 链路 & T 节点发送 $\rightarrow$ G 节点接收 & T 符号 & 接入、TCI（HARQ/CQI/SR）、SRS、T 侧数据等 \\
+附链路 & T 节点发送 $\rightarrow$ 至少一个 T 节点，或至少一个 T 节点与 G 节点接收 & A 符号 & A-PDIB、附链路数据及绑定 DMRS-D 等 \\
+\end{longtable}
+
+\textbf{输入/输出}：输入逻辑链路类型 $\rightarrow$ 输出对应符号类型（G/T/A）及允许的发送/接收角色。
+
+\textbf{时分规则（与 6.2.2.3 一致）}：
+\begin{itemize}[nosep]
+  \item 同一 TTI/无线帧内通过 G/T/A 符号及切换间隔实现时分；
+  \item 不同类型链路之间插入长度 1 个符号的切换间隔；
+  \item 若含附链路，不同发送节点的附链路之间亦插入 1 符号切换间隔；
+  \item 通信域 TTI 至少含 G 链路，且 G 链路位于 TTI 开头。
+\end{itemize}
+
+\textbf{上下文}：三链路\textbf{不属于}直通链路；不得将 D 符号配置到通信域 G/T/A 链路，也不得用 G/T/A 符号承载直通链路业务。
+
+\subsection{6.2.2.10 直通链路}
+
+\textbf{功能}：定义无需预先与 G 节点建立连接、由节点竞争信道获得的直连通信资源，支撑设备间物理层交互。
+
+\textbf{定义}：节点竞争信道获取的、用于与\textbf{未建立连接}的节点通信的资源，称为\textbf{直通链路（Passthrough Link）}。
+
+\begin{longtable}{L{3cm}L{9.5cm}}
+\caption{直通链路角色与资源\label{tab:622-passthrough}} \\
+\toprule
+\textbf{概念} & \textbf{说明} \\
+\midrule
+\endfirsthead
+\multicolumn{2}{c}{\small（续表）} \\
+\toprule
+\textbf{概念} & \textbf{说明} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+先发节点 & 竞争信道成功的节点；发起直通链路占用 \\
+后发节点 & 在直通链路上与先发节点通信的其它节点 \\
+符号类型 & D 符号 + 切换间隔（见 6.2.2.2） \\
+承载内容 & 物理层信号、控制信息、数据信息（如 SAB、P-PCIB、P-DMRS-C、DMRS-D、数据） \\
+资源获取 & 竞争抢占形成 COT；无 G 节点预连接调度前置 \\
+\end{longtable}
+
+\textbf{输入/输出}：输入竞争成功后的 COT 与节点角色 $\rightarrow$ 输出 D 符号序列及先发/后发通信上下文。
+
+\textbf{与通信域对比}：
+
+\begin{longtable}{L{2.8cm}L{5.5cm}L{5.5cm}}
+\caption{通信域与直通链路对比\label{tab:622-domain-vs-passthrough}} \\
+\toprule
+\textbf{对比项} & \textbf{通信域} & \textbf{直通链路} \\
+\midrule
+\endfirsthead
+\multicolumn{3}{c}{\small（续表）} \\
+\toprule
+\textbf{对比项} & \textbf{通信域} & \textbf{直通链路} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+拓扑前提 & 经 G 节点管理；含 G/T/附链路 & 设备直连；无需预建 G 连接 \\
+符号类型 & G / T / A 符号 & D 符号 \\
+资源获取 & G 节点工作载波上的可调度集合 & 竞争信道获得的 COT 资源 \\
+典型 PIB & SAB、RAB、G-PCIB、A-PDIB & SAB、P-PCIB \\
+控制复杂度 & 完整控制面（广播、接入、HARQ、CQI 等） & 精简，侧重直通调度与数据 \\
+\end{longtable}
+
+\textbf{上下文}：直通链路与通信域资源组织\textbf{不可混用}；实现时按域类型选择符号枚举与 PIB 解析入口（见 6.2.1）。若 TTI 内含直通链路且多发送节点时分，不同发送节点之间插入 1 符号切换间隔（6.2.2.3）。
+
+%----------------------------------------------------------------------
+\section{数据类型、长度与维度}
+%----------------------------------------------------------------------
+
+\begin{longtable}{llll}
+\caption{数据类型、长度与维度} \\
+\toprule
+\textbf{对象} & \textbf{维度/规模} & \textbf{单位} & \textbf{标准条款} \\
+\midrule
+子载波索引 $k$ & 0\textasciitilde 160（\#80 恒零） & 子载波 & 6.2.2.7 \\
+符号索引 $l$ & 0\textasciitilde $N_{\mathrm{sym}}^{\mathrm{frame}}{-}1$ & 符号 & 6.2.2.2 \\
+$N_{\mathrm{sym}}^{\mathrm{frame}}$ & 10/12/13/14 & 符号/无线帧 & 表~\ref{tab:622-sym-per-frame} \\
+超帧内无线帧 & 8 & 无线帧/超帧 & 6.2.2.2 \\
+超帧编号 & 0\textasciitilde 65535 循环 & --- & 6.2.2.2 \\
+资源网格 RE 数 & $161 \times N_{\mathrm{sym}}^{\mathrm{frame}}$ & RE/帧/载波/端口 & 6.2.2.6 \\
+基础子载波组/载波 & 16 & 组 & 6.2.2.4 \\
+每组有效子载波 & 10 & 子载波 & 6.2.2.4 \\
+$N_{\mathrm{CH}}$ & 表~\ref{tab:622-nch-lch} 共 18 档 & 基础信道 & 表~\ref{tab:622-nch-lch} \\
+TTI 无线帧数 & $2^{N_{\mathrm{TTI}}}$，$N_{\mathrm{TTI}}\in\{0,\ldots,6\}$ & 无线帧 & 6.2.2.3 \\
+$a_{k,l}^{(p)}$ & 复数值 & --- & 6.2.2.7 \\
+\bottomrule
+\end{longtable}
+
+%----------------------------------------------------------------------
+\section{时序关系与触发条件}
+%----------------------------------------------------------------------
+
+\begin{enumerate}[nosep]
+  \item \textbf{超帧周期}：$T_f = 1$\,ms，编号 \#0\textasciitilde\#65535 循环，与业务调度周期独立；
+  \item \textbf{无线帧}：超帧内固定 8 帧，符号类型决定每帧符号数与边界 CP 位置；
+  \item \textbf{COT 触发}：非连续模式下竞争信道成功后从首无线帧起算，至所有基础载波释放前的末无线帧（含）；
+  \item \textbf{TTI 划分}：COT 或连续模式下每 $2^{N_{\mathrm{TTI}}}$ 无线帧为一个 TTI；通信域 $N_{\mathrm{TTI}}$ 为常数；
+  \item \textbf{链路时分}：通信域 TTI 内 G 链路在首段，G/T/A 间以 1 符号切换间隔分隔；
+  \item \textbf{TTI 结束}：末符号固定为切换间隔，下一 TTI 或释放信道；
+  \item \textbf{直通链路}：竞争获取 COT 后配置 D 符号序列，无 G 节点调度前置。
+\end{enumerate}
+
+%----------------------------------------------------------------------
+\section{处理步骤}
+%----------------------------------------------------------------------
+
+接收侧资源定位流程如下；各步用显式条件推进，不引入状态机。
+
+\textbf{Step 1（符号类型 $\rightarrow$ 每帧符号数）}
+\begin{itemize}[nosep]
+  \item \textbf{进入}：已从广播/同步信息获得符号类型；
+  \item \textbf{动作}：查表~\ref{tab:622-sym-per-frame} 得 $N_{\mathrm{sym}}^{\mathrm{frame}}$；查表~\ref{tab:622-symbol-design} 得 CP/GAP 时长；
+  \item \textbf{失败}：符号类型非法则报错，不进入后续定位。
+\end{itemize}
+
+\textbf{Step 2（帧同步 $\rightarrow$ 边界/一般符号标记）}
+\begin{itemize}[nosep]
+  \item \textbf{进入}：已完成超帧/无线帧边界锁定（依赖 6.2.3/6.2.7）；
+  \item \textbf{动作}：按表~\ref{tab:622-boundary-cp} 标记每帧内边界 CP 符号与一般 CP 符号；
+  \item \textbf{失败}：帧边界未锁定则回退同步流程。
+\end{itemize}
+
+\textbf{Step 3（COT/$N_{\mathrm{TTI}}$ $\rightarrow$ 当前 TTI）}
+\begin{itemize}[nosep]
+  \item \textbf{进入}：已知 COT 起始无线帧（若适用）与 $N_{\mathrm{TTI}}$；
+  \item \textbf{动作}：计算 TTI 无线帧数 $2^{N_{\mathrm{TTI}}}$、当前 TTI 顺序号及所含无线帧范围；
+  \item \textbf{失败}：当前帧不在任何有效 COT/TTI 内则按空闲处理。
+\end{itemize}
+
+\textbf{Step 4（符号配置 $\rightarrow$ 链路类型）}
+\begin{itemize}[nosep]
+  \item \textbf{进入}：已知本 TTI/无线帧的 G/T/A/D 与切换间隔配置；
+  \item \textbf{动作}：将每个符号 $l$ 标注为 G/T/A/D 或切换间隔；校验通信域 TTI 以 G 开头且末符号为切换间隔；
+  \item \textbf{失败}：结构不满足强制规则则丢弃该 TTI 解析。
+\end{itemize}
+
+\textbf{Step 5（$N_{\mathrm{CH}}$ $\rightarrow$ 目标基础载波）}
+\begin{itemize}[nosep]
+  \item \textbf{进入}：已知节点工作信道配置与目标基础载波序号；
+  \item \textbf{动作}：按表~\ref{tab:622-nch-lch} 校验 $N_{\mathrm{CH}}$/$L_{\mathrm{CH}}$，计算工作子载波组编号范围；
+  \item \textbf{失败}：表~\ref{tab:622-nch-lch} 配对失败或载波序号越界则报错。
+\end{itemize}
+
+\textbf{Step 6（$(k,l)_p$ $\rightarrow$ 解调入口）}
+\begin{itemize}[nosep]
+  \item \textbf{进入}：已选定端口 $p$、基础载波与无线帧；
+  \item \textbf{动作}：索引 RE，校验 $k{\neq}80$ 且目标 RE 非空闲后，进入 6.2.3/6.2.4 解调；
+  \item \textbf{失败}：DC/空闲/越界 RE 不得当作有效载荷。
+\end{itemize}
 
 %----------------------------------------------------------------------
 \section{约束与实现要点}
 %----------------------------------------------------------------------
 
 \begin{enumerate}[nosep]
-  \item DC 子载波 \#80 永不承载数据/信号（$a_{80,l} \equiv 0$）；
-  \item 分隔子载波不映射任何内容；
-  \item 边界 CP-OFDM 符号位置必须按表 3 配置，否则符号定时与 6.5.3 的 $l$ 不一致；
-  \item TTI 末符号必须为切换间隔；G 链路必须在通信域 TTI 开头；
-  \item COT/TTI 边界无需与超帧对齐，实现调度时需支持任意无线帧边界起始；
-  \item $N_{\mathrm{CH}}$、$L_{\mathrm{CH}}$ 必须按表 4 配对，否则工作子载波组编号错误。
+  \item \textbf{【DC 子载波】}：$a_{80,l}\equiv 0$，任何信号/控制/数据均不得映射至 \#80。
+  \item \textbf{【分隔子载波】}：多载波频域相邻时，分隔子载波不映射任何内容。
+  \item \textbf{【边界 CP 位置】}：必须严格按表~\ref{tab:622-boundary-cp} 配置，否则符号定时与 6.5.3 的 $l$/$N_{\mathrm{CP}}$ 不一致。
+  \item \textbf{【TTI 结构】}：通信域 TTI 末符号必须为切换间隔；G 链路必须在 TTI 开头。
+  \item \textbf{【边界不对齐】}：COT/TTI 起始可与超帧任意对齐，实现须支持任意无线帧边界。
+  \item \textbf{【$N_{\mathrm{CH}}$/$L_{\mathrm{CH}}$ 配对】}：$N_{\mathrm{CH}}$ 与 $L_{\mathrm{CH}}$ 必须按表~\ref{tab:622-nch-lch} 取值，否则工作子载波组编号错误。
+  \item \textbf{【空闲 RE】}：未分配 RE 映射 $a_{k,l}{=}0$，接收端不得当作有效载荷。
+  \item \textbf{【天线端口】}：通信域 SAB/G-PCIB/广播/G-DMRS-C 须使用同一天线端口做信道估计。
+  \item \textbf{【域不可混用】}：通信域 G/T/A 符号配置不适用于直通链路 D 符号场景。
+  \item \textbf{【OFDM 简称】}：无 CP 的 OFDM 符号 $T_{\mathrm{CP}}{=}0$；与 CP-OFDM 统称``符号''时须区分上下文。
+  \item \textbf{【无状态机】}：帧/TTI/链路/RE 定位用显式条件与查表推进（符号类型、$N_{\mathrm{TTI}}$、域类型），不维护 FSM 跳转表，避免异常路径锁死。
 \end{enumerate}
 
 %----------------------------------------------------------------------
@@ -439,15 +701,16 @@ $l$ 索引 & 0$\sim$ $N_{\mathrm{sym}}^{\mathrm{frame}}-1$ & 6.2.2.7 \\
 \begin{itemize}[nosep]
   \item \textbf{6.2.1}：PIB 与内容分类；6.2.2 提供映射坐标；
   \item \textbf{6.2.3}：FTS/STS/DMRS 等在 RE $(k,l)$ 上的映射规则；
-  \item \textbf{6.2.4/6.2.5}：控制/数据在 G/T/A/D 符号上的块内布局；
-  \item \textbf{6.5.3}：符号号 $l$ 与 $N_{\mathrm{CP}}$ 依赖表 1/表 3 符号类型；
+  \item \textbf{6.2.4/6.2.5}：控制/数据在 G/T/A/D 符号上的块内布局与符号 \# 索引；
+  \item \textbf{6.5.3}：符号号 $l$ 与 $N_{\mathrm{CP}}$ 依赖表~\ref{tab:622-symbol-design}/表~\ref{tab:622-boundary-cp} 符号类型；
+  \item \textbf{6.2.9/6.2.10}：基带 OFDM 合成与射频发射使用本节符号时长参数；
   \item \textbf{8.3}：基础信道中心频率与多载波频域布局；
   \item \textbf{6.3}：灵活带宽在相同帧结构上的带宽扩展。
 \end{itemize}
 
 \vfill
 \begin{center}
-\small\textcolor{gray}{精确参数与字段定义以 T/XS 10001-2025 正式标准为准；本文档仅供 SLB 120\,kHz 物理层实现与联调参考。}
+\small\textcolor{gray}{字段级定义与完整参数以 T/XS 10001-2025 第 6 章及 6.2.2 各子节为准；本文档提供 120\,kHz 帧结构与 RE 坐标系工程解读，供 SLB 物理层实现与联调参考。}
 \end{center}
 
 \end{document}

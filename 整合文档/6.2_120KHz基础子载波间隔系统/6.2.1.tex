@@ -40,10 +40,8 @@
 
 6.2.1 本身不规定波形参数、帧结构或编码算法，而是定义三类内容集合（信号、控制信息、数据信息）及其在 PIB 中的打包方式。
 
-\begin{table}[h]
-\centering
-\small
-\begin{tabular}{L{3.2cm}L{4.8cm}L{5.5cm}}
+\begin{longtable}{L{3.2cm}L{4.8cm}L{5.5cm}}
+\caption{文档范围与模块划分} \\
 \toprule
 \textbf{逻辑子模块} & \textbf{子模块主题} & \textbf{核心输出/行为} \\
 \midrule
@@ -52,15 +50,12 @@
 6.2.1（数据） & 2 类物理层数据信息枚举 & 承载用户/信令载荷的分类；指向 6.2.5 处理流水线 \\
 6.2.1（PIB） & 通信域 4 块 / 直通 2 块 & 信号+控制+数据的时频打包规则；定义散布资源与空闲 RE \\
 \bottomrule
-\end{tabular}
-\end{table}
+\end{longtable}
 
 \section{与相关章节的关系}
 
-\begin{table}[h]
-\centering
-\small
-\begin{tabular}{L{2.2cm}L{2.2cm}L{9.1cm}}
+\begin{longtable}{L{2.2cm}L{2.2cm}L{9.1cm}}
+\caption{与相关章节的关系} \\
 \toprule
 \textbf{相关节号} & \textbf{关系} & \textbf{说明} \\
 \midrule
@@ -73,15 +68,12 @@
 6.2.7/6.2.8 & 下游 & SAB 盲检、FTS 捕获等系统流程，依赖本节内容分类 \\
 6.3 & 平行 & 灵活带宽下相同内容分类的 $\alpha$ 参数缩放 \\
 \bottomrule
-\end{tabular}
-\end{table}
+\end{longtable}
 
 \section{120\,kHz 系统定位与基本参数量}
 
-\begin{table}[h]
-\centering
-\small
-\begin{tabular}{lll}
+\begin{longtable}{lll}
+\caption{120\,kHz 系统基本参数量} \\
 \toprule
 \textbf{概念} & \textbf{说明} & \textbf{标准条款} \\
 \midrule
@@ -90,13 +82,10 @@
 三类内容 & 信号（不承载高层比特）、控制（控制面）、数据（用户面/信令） & 6.1、6.2.1 \\
 PIB 定义 & 为实现特定功能，映射多种信号/控制/数据组合的 RE 集合 & 6.2.1 \\
 \bottomrule
-\end{tabular}
-\end{table}
+\end{longtable}
 
-\begin{table}[h]
-\centering
-\small
-\begin{tabular}{ll}
+\begin{longtable}{ll}
+\caption{后续章节索引} \\
 \toprule
 \textbf{节号} & \textbf{内容} \\
 \midrule
@@ -106,8 +95,7 @@ PIB 定义 & 为实现特定功能，映射多种信号/控制/数据组合的 R
 6.2.5 & 物理层数据信息（第一/二类 TB） \\
 6.2.6\textasciitilde 6.2.10 & 信道编码、3D-FISA、多域同步、基带与射频 \\
 \bottomrule
-\end{tabular}
-\end{table}
+\end{longtable}
 
 \newpage
 %======================================================================
@@ -140,10 +128,8 @@ PIB 定义 & 为实现特定功能，映射多种信号/控制/数据组合的 R
 
 \subsection{上游模块}
 
-\begin{table}[h]
-\centering
-\small
-\begin{tabular}{L{4cm}L{4.5cm}L{5.5cm}}
+\begin{longtable}{L{4cm}L{4.5cm}L{5.5cm}}
+\caption{上游模块输入} \\
 \toprule
 \textbf{上游} & \textbf{输入} & \textbf{说明} \\
 \midrule
@@ -152,15 +138,12 @@ MAC/RLC & 待发送控制/数据比特 & 由 6.2.4/6.2.5 组装后映射 \\
 帧配置/调度 & 域类型、链路类型、符号类型 & 决定 PIB 选择与 RE 映射上下文 \\
 6.2.2 帧结构 & 时频网格 $(k,l)_p$ & RE 坐标与符号编号 \\
 \bottomrule
-\end{tabular}
-\end{table}
+\end{longtable}
 
 \subsection{下游模块}
 
-\begin{table}[h]
-\centering
-\small
-\begin{tabular}{L{4cm}L{4.5cm}L{5.5cm}}
+\begin{longtable}{L{4cm}L{4.5cm}L{5.5cm}}
+\caption{下游模块输出} \\
 \toprule
 \textbf{下游} & \textbf{输出} & \textbf{说明} \\
 \midrule
@@ -170,8 +153,7 @@ MAC/RLC & 待发送控制/数据比特 & 由 6.2.4/6.2.5 组装后映射 \\
 6.2.6/6.5 & 待编码比特流 & CRC、极化码、调制、加扰 \\
 6.2.7/6.2.8 & 搜网/同步流程入口 & 以 SAB/FTS/STS 为第一步 \\
 \bottomrule
-\end{tabular}
-\end{table}
+\end{longtable}
 
 \subsection{本模块不负责的内容}
 
@@ -206,30 +188,39 @@ MAC/RLC & 待发送控制/数据比特 & 由 6.2.4/6.2.5 组装后映射 \\
 
 \subsection{三类内容分类边界}
 
-\begin{table}[h]
-\centering
-\small
-\begin{tabular}{llll}
+\begin{longtable}{llll}
+\caption{三类内容维度（见 6.2.1、6.1）} \\
 \toprule
 \textbf{类型} & \textbf{条目数} & \textbf{是否承载高层比特} & \textbf{映射形态} \\
 \midrule
+\endfirsthead
+\multicolumn{4}{c}{\small（续表）} \\
+\toprule
+\textbf{类型} & \textbf{条目数} & \textbf{是否承载高层比特} & \textbf{映射形态} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
 物理层信号 & 8 & 否 & RE 集合；部分嵌入 SAB/RAB \\
 物理层控制信息 & 17 & 是（控制面） & PIB 内或散布 RE \\
 物理层数据信息 & 2 & 是（用户面/信令） & 调度 RE / A-PDIB \\
-\bottomrule
-\end{tabular}
-\caption{三类内容维度（见 6.2.1、6.1）}
-\end{table}
+\end{longtable}
 
 \subsection{8 类物理层信号索引}
 
-\begin{table}[h]
-\centering
-\small
-\begin{tabular}{clll}
+\begin{longtable}{clll}
+\caption{8 类物理层信号（见 6.2.1）} \\
 \toprule
 \textbf{序号} & \textbf{6.2.1 名称} & \textbf{典型链路} & \textbf{6.2.3 实现条款} \\
 \midrule
+\endfirsthead
+\multicolumn{4}{c}{\small（续表）} \\
+\toprule
+\textbf{序号} & \textbf{6.2.1 名称} & \textbf{典型链路} & \textbf{6.2.3 实现条款} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
 1 & 同步信号 & G/直通/T & 6.2.3.1 FTS/STS \\
 2 & G 链路公共解调参考信号 & G & 6.2.3.4 G-DMRS-C \\
 3 & T 链路控制信息解调参考信号 & T & 6.2.3.7 T-DMRS-C \\
@@ -238,20 +229,23 @@ MAC/RLC & 待发送控制/数据比特 & 由 6.2.4/6.2.5 组装后映射 \\
 6 & 信道探测信号 & T$\rightarrow$G & 6.2.3.2 SRS \\
 7 & 信道状态信息参考信号 & G$\rightarrow$T & 6.2.3.3 CSI-RS \\
 8 & 位置测量信号 & G/T & 6.2.3.9 PMS \\
-\bottomrule
-\end{tabular}
-\caption{8 类物理层信号（见 6.2.1）}
-\end{table}
+\end{longtable}
 
 \subsection{17 类物理层控制信息索引}
 
-\begin{table}[h]
-\centering
-\small
-\begin{tabular}{cll}
+\begin{longtable}{cll}
+\caption{物理层控制信息索引（6.2.1 条文列举 15 项；含通信域/直通同步区分及 DSCI 多格式时，工程实现按 6.2.4 扩展为 17 类）} \\
 \toprule
 \textbf{序号} & \textbf{6.2.1 名称} & \textbf{6.2.4 实现子节} \\
 \midrule
+\endfirsthead
+\multicolumn{3}{c}{\small（续表）} \\
+\toprule
+\textbf{序号} & \textbf{6.2.1 名称} & \textbf{6.2.4 实现子节} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
 1 & 同步信息 & 6.2.4.1 \\
 2 & 广播信息 & 6.2.4.2 \\
 3 & 接入信息 & 6.2.4.4 \\
@@ -267,26 +261,20 @@ MAC/RLC & 待发送控制/数据比特 & 由 6.2.4/6.2.5 组装后映射 \\
 13 & 两级 HARQ 反馈信息 & 6.2.4.10.2 \\
 14 & CQI 反馈信息 & 6.2.4.10.3 \\
 15 & 调度请求信息 & 6.2.4.10.4 \\
-\bottomrule
-\end{tabular}
-\caption{物理层控制信息索引（6.2.1 条文列举 15 项；含通信域/直通同步区分及 DSCI 多格式时，工程实现按 6.2.4 扩展为 17 类）}
-\end{table}
+\end{longtable}
 {\small 注：SAB/RAB/G-PCIB/P-PCIB 为 PIB 容器（6.2.4.2\textasciitilde 5、6.2.4.7、6.2.4.9），不单独计入控制信息清单。}
 
 \subsection{2 类物理层数据信息与 PIB 结构}
 
-\begin{table}[h]
-\centering
-\small
-\begin{tabular}{llll}
+\begin{longtable}{llll}
+\caption{物理层数据信息与 PIB 结构} \\
 \toprule
 \textbf{数据类型} & \textbf{调度特征} & \textbf{典型链路} & \textbf{标准条款} \\
 \midrule
 第一类物理层数据信息 & 仅预配置 & G/T/附 & 6.2.5.2 \\
 第二类物理层数据信息 & 预配置 + 动态 & G/T/D/附 & 6.2.5.3 \\
 \bottomrule
-\end{tabular}
-\end{table}
+\end{longtable}
 
 \textbf{通信域 PIB}（4 块）：SAB、RAB、G-PCIB、A-PDIB。
 
@@ -378,10 +366,8 @@ T 测量下行质量 $\rightarrow$ CQI 反馈（6.2.4.10.3） \\
 \end{itemize}
 
 \textbf{空口所在位置}
-\begin{table}[h]
-\centering
-\small
-\begin{tabular}{llll}
+\begin{longtable}{llll}
+\caption{同步信号空口位置与序列标识} \\
 \toprule
 \textbf{场景} & \textbf{PIB/块} & \textbf{符号布局} & \textbf{序列标识 $u$} \\
 \midrule
@@ -394,8 +380,7 @@ FTS: $u{=}2$（接入块标识） \\
 无 SAB 的基础载波 & 散布 & 该无线帧 \#0=STS &
 STS: G-ID 低 4 位 $+1$ \\
 \bottomrule
-\end{tabular}
-\end{table}
+\end{longtable}
 
 \textbf{流程上下文}：T 节点尚未建立连接时，通过 6.2.7 3D-FISA \textbf{盲检 STS/FTS} 锁定 G 节点 COT；G 节点多域同步（6.2.8）在步骤二捕获邻域 FTS。同步信号\textbf{不承载高层比特}，但 SAB 内 \#3\textasciitilde\#4 紧跟同步信息（控制）。
 
@@ -505,14 +490,19 @@ STS: G-ID 低 4 位 $+1$ \\
 
 \subsubsection{信号在通信域无线帧中的相对位置（示意）}
 
-\begin{table}[h]
-\centering
-\small
-\caption{含 SAB + 广播 + G-PCIB 的典型 TTI 前段符号用途（通信域）}
-\begin{tabular}{clll}
+\begin{longtable}{clll}
+\caption{含 SAB + 广播 + G-PCIB 的典型 TTI 前段符号用途（通信域）} \\
 \toprule
 \textbf{符号 \#} & \textbf{典型内容（信号/控制）} & \textbf{所属 PIB} & \textbf{备注} \\
 \midrule
+\endfirsthead
+\multicolumn{4}{c}{\small（续表）} \\
+\toprule
+\textbf{符号 \#} & \textbf{典型内容（信号/控制）} & \textbf{所属 PIB} & \textbf{备注} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
 0 & STS（同步信号） & SAB & 全带宽 \\
 1\textasciitilde 2 & FTS（同步信号） & SAB & 双符号 FTS \\
 3\textasciitilde 4 & 同步信息 / 接入信息（控制） & SAB 或 RAB & QPSK+极化码 \\
@@ -520,20 +510,23 @@ STS: G-ID 低 4 位 $+1$ \\
 6 & G-DMRS-C（信号）或 RAB 高层数据 & 散布 / RAB & 视 TTI 类型 \\
 7 & 广播续 / G-PCIB 续 & 散布 / G-PCIB & $N_{\mathrm{Symb-G-PCIB}}$ 决定 \\
 8+ & G-PCIB、数据、DMRS-D、CSI-RS 等 & G-PCIB / 散布 & 由广播与调度指示 \\
-\bottomrule
-\end{tabular}
-\end{table}
+\end{longtable}
 
 \subsection{物理层控制信息详解（17 类）}
 
-\begin{table}[h]
-\centering
-\small
-\caption{17 类控制信息：功能与典型所在 PIB/上下文}
-\begin{tabular}{L{4.5cm}L{5.5cm}L{4.5cm}}
+\begin{longtable}{L{4.5cm}L{5.5cm}L{4.5cm}}
+\caption{17 类控制信息：功能与典型所在 PIB/上下文} \\
 \toprule
 \textbf{控制信息} & \textbf{功能} & \textbf{典型位置/上下文} \\
 \midrule
+\endfirsthead
+\multicolumn{3}{c}{\small（续表）} \\
+\toprule
+\textbf{控制信息} & \textbf{功能} & \textbf{典型位置/上下文} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
 \multicolumn{3}{l}{\textit{网络发现与接入}} \\
 同步信息 & 帧/节点/SAB 周期/GCI 位图 & SAB \#3\textasciitilde\#4 \\
 广播信息 & 符号类型、TTI 长度、$N_{\mathrm{Symb-G-PCIB}}$ 等 & \#5、\#7；8\,ms 周期 \\
@@ -551,33 +544,26 @@ G/T 位置（感知）资源指示 & 测量符号/端口/波束配置 & G-PCIB \
 单级/两级 HARQ 反馈 & ACK/NACK、MCS 偏移 & TCI（T 链路） \\
 CQI 反馈 & 各载波/子载波组 MCS 建议 & TCI \\
 调度请求 & T 节点上行资源请求 & TCI 或 RAB 接入目的=1 \\
-\bottomrule
-\end{tabular}
-\end{table}
+\end{longtable}
 
 详细字段见 6.2.4 技术文档。
 
 \subsection{物理层数据信息（2 类）}
 
-\begin{table}[h]
-\centering
-\small
-\begin{tabular}{llll}
+\begin{longtable}{llll}
+\caption{物理层数据信息（2 类）} \\
 \toprule
 \textbf{类型} & \textbf{调度方式} & \textbf{典型链路} & \textbf{配套信号/控制} \\
 \midrule
 第一类 & 仅预配置 & G/T/附 & 固定 $K{\cdot}N$；预配置激活 \\
 第二类 & 预配置 + 动态 & G/T/D/附 & DSCI 指示资源/MCS/HARQ；DMRS-D \\
 \bottomrule
-\end{tabular}
-\end{table}
+\end{longtable}
 
 \subsection{物理层信息块（PIB）与两域对比}
 
-\begin{table}[h]
-\centering
-\small
-\begin{tabular}{lll}
+\begin{longtable}{lll}
+\caption{物理层信息块（PIB）组成} \\
 \toprule
 \textbf{PIB} & \textbf{主要信号 + 控制} & \textbf{数据} \\
 \midrule
@@ -587,8 +573,7 @@ G-PCIB & G-DMRS-C（散布 \#6/\#0）+ 各类 GCI & --- \\
 A-PDIB & STS、FTS、周期 DMRS-D & 附链路第一/二类数据 \\
 P-PCIB（直通） & P-DMRS-C + 直通 DSCI & --- \\
 \bottomrule
-\end{tabular}
-\end{table}
+\end{longtable}
 
 \textbf{散布资源}（不进上述 PIB 整包）：广播、DMRS-D、SRS、CSI-RS、PAS、PMS、G/T 数据 RE、空闲 RE。
 
@@ -598,10 +583,8 @@ P-PCIB（直通） & P-DMRS-C + 直通 DSCI & --- \\
 
 6.2.1 为索引节，不规定各字段位宽；下表汇总\textbf{分类维度}与\textbf{条目规模}，供实现模块划分参考。具体位宽见 6.2.4/6.2.5。
 
-\begin{table}[h]
-\centering
-\small
-\begin{tabular}{llll}
+\begin{longtable}{llll}
+\caption{数据类型、长度与维度} \\
 \toprule
 \textbf{对象/分类} & \textbf{条目数或规模} & \textbf{映射单位} & \textbf{备注} \\
 \midrule
@@ -613,8 +596,7 @@ P-PCIB（直通） & P-DMRS-C + 直通 DSCI & --- \\
 散布资源种类 & 9 类（通信域） & 独立 RE 映射 & 不进四块 PIB 整包 \\
 空闲 RE & 未分配/未调度 & $a_{k,l}{=}0$ & 6.2.2.7 \\
 \bottomrule
-\end{tabular}
-\end{table}
+\end{longtable}
 
 %----------------------------------------------------------------------
 \section{时序关系与触发条件}
@@ -635,10 +617,8 @@ P-PCIB（直通） & P-DMRS-C + 直通 DSCI & --- \\
 \section{链路—信号—PIB 对照表}
 %----------------------------------------------------------------------
 
-\begin{table}[h]
-\centering
-\footnotesize
-\begin{tabular}{L{3.2cm}L{2cm}L{2.2cm}L{2.2cm}L{4.5cm}}
+\begin{longtable}{L{3.2cm}L{2cm}L{2.2cm}L{2.2cm}L{4.5cm}}
+\caption{链路—信号—PIB 对照} \\
 \toprule
 \textbf{内容} & \textbf{通信域 PIB} & \textbf{直通 PIB} & \textbf{链路} & \textbf{6.2.3/6.2.4 条款} \\
 \midrule
@@ -657,8 +637,7 @@ GCI（DSCI 等） & G-PCIB & --- & G & 6.2.4.6\textasciitilde 7 \\
 TCI & --- & --- & T$\rightarrow$G & 6.2.4.10 \\
 第一/二类数据 & 散布 / A-PDIB & 散布 & 各链路 & 6.2.5 \\
 \bottomrule
-\end{tabular}
-\end{table}
+\end{longtable}
 
 %----------------------------------------------------------------------
 \section{约束与实现要点}
