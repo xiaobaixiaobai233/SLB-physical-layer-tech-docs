@@ -1,0 +1,703 @@
+% !TEX program = xelatex
+\documentclass[11pt,a4paper]{ctexart}
+
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{longtable}
+\usepackage{array}
+
+\geometry{left=2.2cm,right=2.2cm,top=2.4cm,bottom=2.4cm}
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue}
+
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newcolumntype{C}[1]{>{\centering\arraybackslash}p{#1}}
+\newcolumntype{T}[1]{>{\ttfamily\raggedright\arraybackslash\footnotesize}p{#1}}
+\newcommand{\tid}[1]{\texttt{\detokenize{#1}}}
+
+\title{%
+  \textbf{星闪 SLB 物理层}\\[0.35em]
+  \Large L0 + L1 参数登记册（初稿）\\[0.25em]
+  \large 全 PHY 共用常量 \textbullet\ 上层下发会话配置 \textbullet\ 读写所有权
+}
+\author{依据当前工作区技术文档分册整理（6.2 / 6.5 / 6.6）\\
+精确数值与字段定义以 T/XS 10001-2025 正式标准为准\\[0.3em]
+\small 工程用途：AI 分模块实现时的跨模块参数真源（SSOT）初稿；\\
+\small 命名约定 airMode\,=\,\texttt{slb}（nearlink-naming）
+}
+\date{2026 年 7 月 27 日}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+%======================================================================
+\part{总览}
+%======================================================================
+
+\section{文档目的与范围}
+
+本文档汇总 SLB 120\,kHz 物理层实现中应统一管理的两类参数：
+
+\begin{enumerate}[nosep]
+  \item \textbf{L0 系统常量}：全 PHY 共用、基本不变的时频/网格/物理常数；
+  \item \textbf{L1 会话配置}：由上层（MAC / 第 7 章解析 / 调度）下发，PHY 各模块只读消费的量。
+\end{enumerate}
+
+\textbf{不在本册展开}：L2（模块专有可调参数）、L3（运行时测量/命令交换量）。二者见 README 后续安排，随各模块接口暴露文档补入。
+
+\textbf{设计原则}：
+\begin{itemize}[nosep]
+  \item 每条参数有稳定 \texttt{id}、建议工程名、单位、归属节号、写者、读者、状态；
+  \item L0 禁止业务模块私建同义 magic number；
+  \item L1 禁止 PHY 子模块自行改写（如自主升 MCS、改 $P_o$）；
+  \item 文档会迭代：\texttt{frozen} / \texttt{draft} / \texttt{tbd} 标明置信度，不要求等齐全员终稿。
+\end{itemize}
+
+\section{状态与读写约定}
+
+\begin{longtable}{L{2.2cm}L{12.5cm}}
+\caption{状态定义\label{tab:status}} \\
+\toprule
+\textbf{status} & \textbf{含义} \\
+\midrule
+\texttt{frozen} & 当前工程可直接引用；数值来自已有分册且与标准一致（仍以正式标准为准） \\
+\texttt{draft} & 已从本工作区文档抽出；字段名/结构可能随他章对齐而调整 \\
+\texttt{tbd} & 已知需要，但本工作区缺少完整定义，待与对应负责人边界对齐 \\
+\bottomrule
+\end{longtable}
+
+\begin{longtable}{L{2.2cm}L{12.5cm}}
+\caption{读写约定\label{tab:rw}} \\
+\toprule
+\textbf{层} & \textbf{约定} \\
+\midrule
+L0 & 只读；由 \texttt{slb\_phy\_const}（或等价）统一导出 \\
+L1 & 上层写、PHY 读；建议落入单一 \texttt{SlbPhySessionConfig}（定位子集可映到 \texttt{SlbPosContext}） \\
+\bottomrule
+\end{longtable}
+
+\section{抽取来源}
+
+\begin{longtable}{L{4.5cm}L{10.2cm}}
+\caption{本册参数主要来源\label{tab:src}} \\
+\toprule
+\textbf{来源} & \textbf{贡献} \\
+\midrule
+6.2.2 技术文档 & $f_s$、$T_s$、$\Delta f$、符号/CP、超帧、TTI、161/DC、$N_{\mathrm{CH}}$/$L_{\mathrm{CH}}$ \\
+6.5 章级/分册 & $P_o$、$P_{\mathrm{MAX}}$、参考功率、MCS$\rightarrow$调制阶、$N_{\mathrm{ID}}$ 类消费 \\
+6.6 及接口暴露 & PhyID、角色、能力位、坐标系、XRC 已解析字段子集、光速 \\
+第 7 / 8 章（引用） & XRC/能力 IE 归属、射频 $P_{\mathrm{MAX}}$（本册标 draft/tbd） \\
+\bottomrule
+\end{longtable}
+
+\newpage
+%======================================================================
+\part{L0 系统常量}
+%======================================================================
+
+\section{L0 说明}
+
+L0 是全物理层共用的只读真源。任何 6.2 / 6.5 / 6.6 实现库\textbf{不得}在本地再写一份 ``120\,kHz'' ``161'' 等字面量副本；应引用本表 \texttt{id} 或生成头文件中的常量名。
+
+\section{时间与频率基准}
+
+\begin{longtable}{L{3.6cm}L{2.8cm}L{1.6cm}L{2.2cm}L{1.6cm}L{1.4cm}L{1.6cm}}
+\caption{L0：时间与频率基准\label{tab:l0-tf}} \\
+\toprule
+\textbf{id} & \textbf{工程名} & \textbf{符号} & \textbf{取值} & \textbf{单位} & \textbf{归属} & \textbf{状态} \\
+\midrule
+\endfirsthead
+\multicolumn{7}{c}{\small（续表）时间与频率基准} \\
+\toprule
+\textbf{id} & \textbf{工程名} & \textbf{符号} & \textbf{取值} & \textbf{单位} & \textbf{归属} & \textbf{状态} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\texttt{slb.phy.fsHz} &
+\texttt{fsHz} &
+$f_s$ &
+$30.72\times10^{6}$ &
+Hz &
+6.1 &
+\texttt{frozen} \\
+\texttt{slb.phy.tsSec} &
+\texttt{tsSec} &
+$T_s$ &
+$1/f_s\approx 32.55\times10^{-9}$ &
+s &
+6.1 &
+\texttt{frozen} \\
+\texttt{slb.phy.deltaFHz} &
+\texttt{deltaFHz} &
+$\Delta f$ &
+$120\times10^{3}$（$=f_s/256$） &
+Hz &
+6.2.2.1 &
+\texttt{frozen} \\
+\texttt{slb.phy.ofdmUsefulLenTs} &
+\texttt{ofdmUsefulLenTs} &
+--- &
+$256$ &
+$T_s$ &
+6.2.2.1 &
+\texttt{frozen} \\
+\texttt{slb.phy.ofdmUsefulDurationUs} &
+\texttt{ofdmUsefulDurationUs} &
+--- &
+$\approx 8.333$ &
+$\mu$s &
+6.2.2.1 &
+\texttt{frozen} \\
+\texttt{slb.phy.superframeDurationUs} &
+\texttt{superframeDurationUs} &
+$T_f$ &
+$1000$（$=30720\,T_s$） &
+$\mu$s &
+6.2.2.2 &
+\texttt{frozen} \\
+\texttt{slb.phy.radioFramesPerSuperframe} &
+\texttt{radioFramesPerSuperframe} &
+--- &
+$8$ &
+--- &
+6.2.2.2 &
+\texttt{frozen} \\
+\end{longtable}
+
+\begin{longtable}{L{3.8cm}L{3.2cm}L{8.2cm}}
+\caption{L0 时频基准：读写\label{tab:l0-tf-rw}} \\
+\toprule
+\textbf{id} & \textbf{写} & \textbf{读（消费者）} \\
+\midrule
+上表全部 & 无（常量） & 6.2.2--6.2.10、6.5.*、6.6.*、基带定时 \\
+\bottomrule
+\end{longtable}
+
+\section{资源网格与载波常量}
+
+\begin{longtable}{L{3.8cm}L{3.0cm}L{2.4cm}L{1.6cm}L{1.8cm}L{1.6cm}}
+\caption{L0：网格与载波常量\label{tab:l0-grid}} \\
+\toprule
+\textbf{id} & \textbf{工程名} & \textbf{取值} & \textbf{单位} & \textbf{归属} & \textbf{状态} \\
+\midrule
+\endfirsthead
+\multicolumn{6}{c}{\small（续表）网格与载波} \\
+\toprule
+\textbf{id} & \textbf{工程名} & \textbf{取值} & \textbf{单位} & \textbf{归属} & \textbf{状态} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\texttt{slb.phy.subcarrierCount} &
+\texttt{subcarrierCount} &
+$161$ &
+--- &
+6.2.2.4 &
+\texttt{frozen} \\
+\texttt{slb.phy.dcSubcarrierIndex} &
+\texttt{dcSubcarrierIndex} &
+$80$（不映射） &
+--- &
+6.2.2.4 / 6.5.3 &
+\texttt{frozen} \\
+\texttt{slb.phy.baseChannelBandwidthMHz} &
+\texttt{baseChannelBandwidthMHz} &
+$20$ &
+MHz &
+6.2.2.4 &
+\texttt{frozen} \\
+\texttt{slb.phy.baseSubcarrierGroupCount} &
+\texttt{baseSubcarrierGroupCount} &
+$16$（每 10 有效子载波一组） &
+--- &
+6.2.2.4 &
+\texttt{frozen} \\
+\texttt{slb.phy.rsQpskLength} &
+\texttt{rsQpskLength} &
+$161$ &
+--- &
+6.5.3 &
+\texttt{frozen} \\
+\texttt{slb.phy.goldPnForRs} &
+\texttt{goldPnLengthForRs} &
+$M_{\mathrm{PN}}=322$ &
+bit &
+6.5.3 &
+\texttt{frozen} \\
+\end{longtable}
+
+\noindent\textbf{读写}：写=无；读=资源映射、RS 生成、SC-FDMA/OFDM、定位 PMS 映射等。
+
+\section{符号类型相关常量（查表用）}
+
+以下为 L0\textbf{查表常量}（随符号类型取一行），表体来自 6.2.2.1 / 6.2.2.2；运行时由 L1 的符号类型配置选择行。
+
+\begin{longtable}{L{2.0cm}L{2.4cm}L{2.4cm}L{2.0cm}L{2.4cm}C{1.6cm}}
+\caption{L0：五种符号类型 CP/时长摘要\label{tab:l0-sym}} \\
+\toprule
+\textbf{类型} & \textbf{一般 CP} & \textbf{一般符号} & \textbf{GAP1} & \textbf{边界符号} & \textbf{$N_{\mathrm{sym}}^{\mathrm{frame}}$} \\
+\midrule
+\endfirsthead
+\multicolumn{6}{c}{\small（续表）符号类型} \\
+\toprule
+\textbf{类型} & \textbf{一般 CP} & \textbf{一般符号} & \textbf{GAP1} & \textbf{边界符号} & \textbf{$N_{\mathrm{sym}}^{\mathrm{frame}}$} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+一 A & $18T_s$ & $274T_s$ & $20T_s$ & $276T_s$ & 14 \\
+一 B & $18T_s$ & $274T_s$ & $22T_s$ & $278T_s$ & 14 \\
+二 & $39T_s$ & $295T_s$ & $44T_s$ & $300T_s$ & 13 \\
+三 & $64T_s$ & $320T_s$ & --- & --- & 12 \\
+四 & $128T_s$ & $384T_s$ & --- & --- & 10 \\
+\end{longtable}
+
+\begin{longtable}{L{4.5cm}L{10.2cm}}
+\caption{L0：符号类型与 $N_{\mathrm{CP}}$ 映射（供 6.5.3）\label{tab:l0-ncp}} \\
+\toprule
+\textbf{id / 规则} & \textbf{内容} \\
+\midrule
+\texttt{slb.phy.symbolTypeToNcp} &
+类型一 A/B $\rightarrow N_{\mathrm{CP}}=3$；类型二 $\rightarrow 2$；类型三 $\rightarrow 1$；类型四 $\rightarrow 0$ \\
+状态 & \texttt{frozen}；归属 6.2.2 $\leftrightarrow$ 6.5.3 \\
+写 / 读 & 无 / RS QPSK、加扰相关初始化 \\
+\bottomrule
+\end{longtable}
+
+\section{物理常数}
+
+\begin{longtable}{L{3.8cm}L{3.2cm}L{3.5cm}L{1.6cm}L{1.6cm}L{1.6cm}}
+\caption{L0：物理常数\label{tab:l0-phys}} \\
+\toprule
+\textbf{id} & \textbf{工程名} & \textbf{取值} & \textbf{单位} & \textbf{归属} & \textbf{状态} \\
+\midrule
+\texttt{slb.phy.speedOfLightMps} &
+\texttt{speedOfLightMps} &
+$299792458.0$（默认） &
+m/s &
+6.6.2.1 &
+\texttt{frozen} \\
+\end{longtable}
+
+\noindent\textbf{读写}：写=无（测试可注入覆盖，但不得改默认真源）；读=RTT/复合 CSI 解距等。
+
+\newpage
+%======================================================================
+\part{L1 会话 / 上层下发配置}
+%======================================================================
+
+\section{L1 说明}
+
+L1 是\textbf{会话级}配置：在接入、XRC 重配、调度更新时由上层写入，PHY 各库通过只读上下文消费。推荐工程入口：
+
+\begin{itemize}[nosep]
+  \item 全 PHY：\texttt{SlbPhySessionConfig}（待下一步固化字段表）；
+  \item 定位子集：已有 \texttt{SlbPosContext} / \texttt{slbPosApplyXrcConfig}（6.6 接口暴露），应映射到同一 L1 真源，避免双写。
+\end{itemize}
+
+\section{身份与节点}
+
+\begin{longtable}{L{3.4cm}L{2.6cm}L{1.4cm}L{2.0cm}L{2.4cm}L{2.4cm}L{1.4cm}}
+\caption{L1：身份与节点\label{tab:l1-id}} \\
+\toprule
+\textbf{id} & \textbf{工程名} & \textbf{单位} & \textbf{归属} & \textbf{写} & \textbf{读} & \textbf{状态} \\
+\midrule
+\endfirsthead
+\multicolumn{7}{c}{\small（续表）身份与节点} \\
+\toprule
+\textbf{id} & \textbf{工程名} & \textbf{单位} & \textbf{归属} & \textbf{写} & \textbf{读} & \textbf{状态} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\texttt{slb.session.localPhyId} &
+\texttt{localPhyId} &
+--- &
+接入/XRC &
+第 7 章/MAC &
+6.6 FLAG/报告 &
+\texttt{draft} \\
+\texttt{slb.session.cellId} &
+\texttt{nId} / $N_{\mathrm{ID}}$ &
+--- &
+6.5.3/小区 &
+系统消息/接入 &
+RS、部分 $c_{\mathrm{init}}$ &
+\texttt{draft} \\
+\texttt{slb.session.gPid} &
+\texttt{nGPid} / $N_{\mathrm{G-PID}}$ &
+--- &
+6.5.7 &
+调度/系统 &
+数据加扰默认 $c_{\mathrm{init}}$ &
+\texttt{draft} \\
+\texttt{slb.session.posRole} &
+\texttt{role} &
+枚举 &
+6.6.1 &
+XRC &
+6.6 全包 &
+\texttt{draft} \\
+\texttt{slb.session.fixNodePhyId} &
+\texttt{fixNodePhyId} &
+--- &
+6.6.1 &
+XRC &
+6.6.4 解算 &
+\texttt{draft} \\
+\end{longtable}
+
+\section{帧、TTI 与载波配置}
+
+\begin{longtable}{L{3.6cm}L{2.8cm}L{1.4cm}L{2.0cm}L{2.2cm}L{2.2cm}L{1.4cm}}
+\caption{L1：帧 / TTI / 载波\label{tab:l1-frame}} \\
+\toprule
+\textbf{id} & \textbf{工程名} & \textbf{单位} & \textbf{归属} & \textbf{写} & \textbf{读} & \textbf{状态} \\
+\midrule
+\endfirsthead
+\multicolumn{7}{c}{\small（续表）帧/TTI/载波} \\
+\toprule
+\textbf{id} & \textbf{工程名} & \textbf{单位} & \textbf{归属} & \textbf{写} & \textbf{读} & \textbf{状态} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\texttt{slb.session.symbolType} &
+\texttt{symbolType} &
+枚举 &
+6.2.2.1 &
+高层/MAC &
+帧结构、OFDM、$N_{\mathrm{CP}}$ &
+\texttt{draft} \\
+\texttt{slb.session.nTti} &
+\texttt{nTti} &
+0--6 &
+6.2.2.3 &
+高层/MAC &
+TTI 长度=$2^{N_{\mathrm{TTI}}}$ 无线帧 &
+\texttt{draft} \\
+\texttt{slb.session.nCh} &
+\texttt{nCh} &
+档位 &
+6.2.2.4 &
+高层/MAC &
+工作信道数 &
+\texttt{draft} \\
+\texttt{slb.session.lCh} &
+\texttt{lCh} &
+档位 &
+6.2.2.4 &
+由 $N_{\mathrm{CH}}$ 表定或配置 &
+工作载波粒度 &
+\texttt{draft} \\
+\texttt{slb.session.centerFreqHz} &
+\texttt{centerFreqHz} &
+Hz &
+8.3 &
+射频/系统 &
+多载波布局 &
+\texttt{tbd} \\
+\end{longtable}
+
+\noindent\textbf{注}：$N_{\mathrm{CH}}$ 与 $L_{\mathrm{CH}}$ 18 档对应关系见 6.2.2 表（本册不重复抄写全部档位）；实现时应引用同一查表，禁止模块内硬编码残缺子集。
+
+\section{功率相关（上层下发）}
+
+\begin{longtable}{L{3.8cm}L{3.2cm}L{1.4cm}L{2.0cm}L{2.4cm}L{2.0cm}L{1.4cm}}
+\caption{L1：功率配置\label{tab:l1-pwr}} \\
+\toprule
+\textbf{id} & \textbf{工程名} & \textbf{单位} & \textbf{归属} & \textbf{写} & \textbf{读} & \textbf{状态} \\
+\midrule
+\endfirsthead
+\multicolumn{7}{c}{\small（续表）功率} \\
+\toprule
+\textbf{id} & \textbf{工程名} & \textbf{单位} & \textbf{归属} & \textbf{写} & \textbf{读} & \textbf{状态} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\texttt{slb.session.p0SrsDbm} &
+\texttt{srsP0NominalDbm} &
+dBm &
+6.5.4 &
+XRC/系统消息 &
+6.5.4 &
+\texttt{draft} \\
+\texttt{slb.session.p0RachDbm} &
+\texttt{rachP0NominalDbm} &
+dBm &
+6.5.4 &
+同上 &
+6.5.4 &
+\texttt{draft} \\
+\texttt{slb.session.p0AckDbm} &
+\texttt{ackP0NominalDbm} &
+dBm &
+6.5.4 &
+同上 &
+6.5.4 &
+\texttt{draft} \\
+\texttt{slb.session.p0DataClass1Dbm} &
+\texttt{dataClass1P0NominalDbm} &
+dBm &
+6.5.4 &
+同上 &
+6.5.4 &
+\texttt{draft} \\
+\texttt{slb.session.p0DataClass2Dbm} &
+\texttt{dataClass2P0NominalDbm} &
+dBm &
+6.5.4 &
+同上 &
+6.5.4 &
+\texttt{draft} \\
+\texttt{slb.session.gLinkRefSignalPowerDbm} &
+\texttt{gLinkReferenceSignalPowerDbm} &
+dBm &
+6.5.4 &
+XRC/系统消息 &
+$P_L$、功控 &
+\texttt{draft} \\
+\texttt{slb.session.pMaxDbm} &
+\texttt{pMaxDbm} &
+dBm &
+第 8 章/射频 &
+射频能力/法规 &
+6.5.4 限幅 &
+\texttt{draft} \\
+\end{longtable}
+
+\noindent\textbf{强制}：PHY 只执行已配置的 $P_o$/$P_{\mathrm{MAX}}$，不得根据信道质量自行改写目标功率。
+
+\section{MCS 与调制阶}
+
+\begin{longtable}{L{3.6cm}L{2.8cm}L{1.4cm}L{2.0cm}L{2.4cm}L{2.2cm}L{1.4cm}}
+\caption{L1：MCS / 调制\label{tab:l1-mcs}} \\
+\toprule
+\textbf{id} & \textbf{工程名} & \textbf{单位} & \textbf{归属} & \textbf{写} & \textbf{读} & \textbf{状态} \\
+\midrule
+\endfirsthead
+\multicolumn{7}{c}{\small（续表）MCS} \\
+\toprule
+\textbf{id} & \textbf{工程名} & \textbf{单位} & \textbf{归属} & \textbf{写} & \textbf{读} & \textbf{状态} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\texttt{slb.session.mcsIndex} &
+\texttt{mcsIndex} &
+--- &
+6.2.5 &
+调度/MAC &
+查 MCS 表 $\rightarrow$ 调制阶 &
+\texttt{draft} \\
+\texttt{slb.session.modType} &
+\texttt{modType} &
+枚举 &
+6.5.6 &
+由 MCS/固定配置导出 &
+6.5.6 调制 LUT &
+\texttt{draft} \\
+\texttt{slb.session.modulationOrderM} &
+\texttt{modulationOrderM} &
+$\{2,4,\ldots,12\}$ &
+6.5.6 &
+派生 &
+比特打包/符号数 &
+\texttt{draft} \\
+\end{longtable}
+
+\noindent\textbf{链路特例（配置面，非 PHY 自主）}：多数控制固定 QPSK；TCI 二阶段 ACK 可为 QPSK/16QAM；数据为 MCS 表决定的 QPSK--4096QAM。\\
+\textbf{强制}：\texttt{【无自主升阶】}——PHY 不根据 SINR 自行改 MCS。
+
+\section{定位能力与坐标系}
+
+\begin{longtable}{L{3.8cm}L{3.0cm}L{1.4cm}L{2.0cm}L{2.2cm}L{2.2cm}L{1.4cm}}
+\caption{L1：定位能力 / 坐标系\label{tab:l1-poscap}} \\
+\toprule
+\textbf{id} & \textbf{工程名} & \textbf{单位} & \textbf{归属} & \textbf{写} & \textbf{读} & \textbf{状态} \\
+\midrule
+\endfirsthead
+\multicolumn{7}{c}{\small（续表）定位能力} \\
+\toprule
+\textbf{id} & \textbf{工程名} & \textbf{单位} & \textbf{归属} & \textbf{写} & \textbf{读} & \textbf{状态} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\texttt{slb.session.ofdmPositioningCapable} &
+\texttt{ofdmPositioningCapable} &
+bool &
+6.6 / 能力 IE &
+第 7 章能力 &
+6.6 RTT 准入 &
+\texttt{draft} \\
+\texttt{slb.session.posFrameType} &
+\texttt{frameType} &
+ABS/REL &
+6.6.1/6.6.4 &
+XRC &
+坐标解算输出 &
+\texttt{draft} \\
+\texttt{slb.session.anchorXyzM} &
+\texttt{anchorXyzM[3]} &
+m &
+6.6.1 &
+XRC &
+6.6.4 &
+\texttt{draft} \\
+\texttt{slb.session.syncSequenceU} &
+\texttt{syncSequenceU} &
+--- &
+同步/FLAG &
+G 配置 &
+与 PMS $u$ 隔离校验 &
+\texttt{draft} \\
+\end{longtable}
+
+\section{XRC 已解析字段（定位配置子集）}
+
+本表只登记\textbf{PHY/6.6 允许消费的已解析字段}；禁止传入 ASN.1 原文。完整 IE 以第 7.5 章为准（多数字段 \texttt{tbd}/\texttt{draft}）。
+
+\begin{longtable}{L{3.6cm}L{3.2cm}L{5.0cm}L{2.2cm}L{1.4cm}}
+\caption{L1：XRC 已解析字段（子集）\label{tab:l1-xrc}} \\
+\toprule
+\textbf{id} & \textbf{工程名/字段} & \textbf{用途} & \textbf{读} & \textbf{状态} \\
+\midrule
+\endfirsthead
+\multicolumn{5}{c}{\small（续表）XRC 字段} \\
+\toprule
+\textbf{id} & \textbf{工程名/字段} & \textbf{用途} & \textbf{读} & \textbf{状态} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\texttt{slb.session.xrc.roles} &
+角色指派 / \texttt{posCalculator} 等 &
+锚点/标签/解算节点 &
+6.6.1 &
+\texttt{draft} \\
+\texttt{slb.session.xrc.staticRes} &
+静态时频/端口/波束/载波/带宽/序列 &
+纯 XRC 模式全量；或与 GCI 组合 &
+6.6.* &
+\texttt{draft} \\
+\texttt{slb.session.xrc.measItems} &
+可选测量项开关 &
+RTT/角度/跳频等任务使能 &
+6.6 &
+\texttt{draft} \\
+\texttt{slb.session.xrc.groupcast} &
+\texttt{groupcastConfig} &
+FLAG 组播 &
+6.6.2.2 &
+\texttt{draft} \\
+\texttt{slb.session.xrc.nonConnectMeas} &
+\texttt{nonConnectMeasConfig} &
+无连接测量 &
+6.6 &
+\texttt{draft} \\
+\texttt{slb.session.xrc.nodeCoords} &
+\texttt{nodePositioningCoordinates} &
+锚点已知坐标 &
+6.6.4 &
+\texttt{draft} \\
+\texttt{slb.session.xrc.reportTarget} &
+上报目标 &
+报告 IE 汇聚方向 &
+6.6 P7 &
+\texttt{draft} \\
+\texttt{slb.session.xrc.hopConfig} &
+跳频图案 / $T_{\mathrm{RF}}$ 等 &
+6.6.2.3 复合测距 &
+6.6 P4 &
+\texttt{draft} \\
+\texttt{slb.session.xrc.securePms} &
+安全 PMS 开关 &
+是否用安全序列 &
+6.2.3.9 / 6.6 &
+\texttt{draft} \\
+\end{longtable}
+
+\noindent\textbf{写}：一律为第 7 章解析器 $\rightarrow$ \texttt{slbPosApplyXrcConfig}（或将来的 SessionConfig 应用接口）。\\
+\textbf{禁止}：6.6/PHY 内二次 ASN.1 解码；禁止暴露射频句柄与内部缓冲布局。
+
+\section{与动态指示的边界（非 L1 常驻，但相关）}
+
+下列量常由 GCI/TCI \textbf{当次}更新，更接近 L3 事件入参；此处仅作边界说明，避免误放入 Session 常驻字段：
+
+\begin{longtable}{L{4.5cm}L{10.2cm}}
+\caption{L1 与当次动态指示的边界\label{tab:l1-vs-dyn}} \\
+\toprule
+\textbf{对象} & \textbf{处理建议} \\
+\midrule
+GCI 格式 0--2 资源 & 当次 RTT/角度时频；经 \texttt{slbPosApplyGciResource} 写入会话的``当前资源''槽，勿与 XRC 静态混为同一不可变字段 \\
+GCI 第四格式激活位 & 事件：开测/关测；不作为长期配置常量 \\
+调度给出的当次 $M$（子载波数） & 功控入参；可视为 L3/调用参数，不必全部进入 Session 静态区 \\
+\bottomrule
+\end{longtable}
+
+\newpage
+%======================================================================
+\part{汇总、缺口与下一步}
+%======================================================================
+
+\section{L0 / L1 条目计数（初稿）}
+
+\begin{longtable}{L{3cm}C{3cm}L{8.5cm}}
+\caption{初稿覆盖统计\label{tab:count}} \\
+\toprule
+\textbf{层} & \textbf{约条目} & \textbf{说明} \\
+\midrule
+L0 & $\sim$20+（含符号类型表） & 时频、网格、符号查表、$N_{\mathrm{CP}}$、光速 \\
+L1 身份/帧/载波 & $\sim$10 & PhyID、小区/G-PID、角色、$N_{\mathrm{TTI}}$、$N_{\mathrm{CH}}$ 等 \\
+L1 功率/MCS & $\sim$10 & 五类 $P_o$、参考功率、$P_{\mathrm{MAX}}$、MCS/调制 \\
+L1 定位/XRC & $\sim$12 & 能力、坐标、XRC 已解析子集 \\
+\bottomrule
+\end{longtable}
+
+\section{已知缺口（需向他人/他章对齐）}
+
+\begin{longtable}{L{4.5cm}L{10.2cm}}
+\caption{tbd / 高优先级 draft\label{tab:gap}} \\
+\toprule
+\textbf{缺口} & \textbf{建议动作} \\
+\midrule
+完整 XRC IE 字段表 & 向第 7.5 章负责人只要「已解析结构体字段清单」，不要等全文 \\
+$N_{\mathrm{ID}}$ / $N_{\mathrm{G-PID}}$ 正式工程名与位宽 & 与系统消息/接入文档对齐后改 \texttt{frozen} \\
+中心频率与信道号表 & 对齐第 8.3 章 \\
+MCS 表索引 $\leftrightarrow$ 调制阶完整映射 & 对齐 6.2.5 分册后写入查表（仍属 L1 派生） \\
+SessionConfig 与 PosContext 字段合一 & 下一步专项：避免双会话 \\
+\bottomrule
+\end{longtable}
+
+\section{建议的下一步工作}
+
+\begin{enumerate}[nosep]
+  \item 组内评审本 PDF：确认 L0 可全部 \texttt{frozen}；
+  \item 起草 \texttt{SlbPhySessionConfig} 字段表（直接映射本册 L1）；
+  \item 编写 \texttt{slb-param-contract} Skill（强制引用本登记册）；
+  \item 按模块补 L2，并推广「接口暴露」文档模式；
+  \item （可选）导出 \texttt{registry.yaml} 供代码生成与 magic-number 校验。
+\end{enumerate}
+
+\section{约束摘要（实现取向）}
+
+\begin{enumerate}[nosep]
+  \item \textbf{【无状态机】}：配置应用与流程推进用事件/条件判断，不维护章级 FSM；
+  \item \textbf{【无自主升阶】}：MCS/调制阶只执行配置；
+  \item \textbf{【XRC 已解析】}：禁止 raw PDU 进入 PHY；
+  \item \textbf{【单位后缀】}：工程名遵循 nearlink-naming（\texttt{Hz}/\texttt{Us}/\texttt{Dbm}/\texttt{M} 等）；
+  \item \textbf{【分册为准】}：与正式标准或更新分册冲突时，先改登记册再改代码。
+\end{enumerate}
+
+\vspace{1.5em}
+{\small\textcolor{gray}{本登记册为工程/AI 实现用初稿，仅供理解与对齐参考；精确参数与字段定义以 T/XS 10001-2025 正式标准及各有效技术文档分册为准。}}
+
+\end{document}

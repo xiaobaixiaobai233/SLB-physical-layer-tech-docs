@@ -1,0 +1,479 @@
+% !TEX program = xelatex
+\documentclass[11pt,a4paper]{ctexart}
+
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{listings}
+
+\geometry{left=2.2cm,right=2.2cm,top=2.4cm,bottom=2.4cm}
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue}
+
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newcolumntype{C}[1]{>{\centering\arraybackslash}p{#1}}
+
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  keywordstyle=\bfseries,
+  commentstyle=\itshape\color{gray!70!black},
+  breaklines=true,
+  columns=fullflexible,
+  frame=single,
+  rulecolor=\color{black!25},
+  xleftmargin=0.5em,
+  xrightmargin=0.5em,
+  showstringspaces=false,
+  morekeywords={struct,typedef,enum,uint8_t,uint16_t,uint32_t,int32_t,bool,double,float,const}
+}
+
+\title{%
+  \textbf{星闪 SLB 物理层}\\[0.35em]
+  \Large \texttt{SlbPhySessionConfig} 字段表（初稿）\\[0.25em]
+  \large L1 会话契约 \textbullet\ 上层写入 / PHY 只读 \textbullet\ 与 \texttt{SlbPosContext} 映射
+}
+\author{依据 \texttt{参数登记册} L0/L1 初稿整理\\
+精确字段以 T/XS 10001-2025 与各分册、第 7 章解析结果为准\\[0.25em]
+\small airMode\,=\,\texttt{slb}（nearlink-naming）；提取流程见 skill \texttt{slb-param-registry}
+}
+\date{2026 年 7 月 27 日}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+%======================================================================
+\part{总览}
+%======================================================================
+
+\section{目的}
+
+把 L1 登记册中的「上层下发、全 PHY 共用」的量，固化为一份工程结构体契约：
+\textbf{\texttt{SlbPhySessionConfig}}。
+
+\begin{itemize}[nosep]
+  \item \textbf{写}：MAC / 第 7 章解析器 / 调度（经 apply 接口写入）；
+  \item \textbf{读}：6.2 / 6.5 / 6.6 各库只读；禁止子模块改 MCS、$P_o$、角色等；
+  \item \textbf{与定位}：\texttt{SlbPosContext} 为定位视图，字段映射到本结构（或内嵌指针），\textbf{禁止双写两套真源}。
+\end{itemize}
+
+本文件是\textbf{初稿}：多数字段 \texttt{draft}；完整 XRC IE 位宽等待第 7 章对齐后升 \texttt{frozen}。
+
+\section{设计原则}
+
+\begin{enumerate}[nosep]
+  \item 一层会话入口：全 PHY 只认 \texttt{SlbPhySessionConfig}（及只读视图）；
+  \item XRC/能力只收\textbf{已解析}结果，禁止 \texttt{asn1Bytes}；
+  \item 物理量带单位后缀（\texttt{Dbm}/\texttt{Hz}/\texttt{M}/\texttt{Us}）；
+  \item 当次动态指示（GCI-4 激活、当次占用子载波数 $M$ 等）放在\textbf{调用参数 / L3}，不塞进本结构的「静态会话区」；
+  \item 无状态机：配置应用是纯写入 + 校验，失败立即返回错误码。
+\end{enumerate}
+
+\section{结构分组}
+
+\begin{longtable}{L{2.2cm}L{4.5cm}L{7.5cm}}
+\caption{SessionConfig 逻辑分组\label{tab:groups}} \\
+\toprule
+\textbf{组} & \textbf{C 建议名} & \textbf{内容} \\
+\midrule
+G0 & --- & 版本 / 校验摘要（可选） \\
+G1 & \texttt{identity} & PhyID、小区/$N_{\mathrm{ID}}$、$N_{\mathrm{G-PID}}$ \\
+G2 & \texttt{frameCarrier} & 符号类型、$N_{\mathrm{TTI}}$、$N_{\mathrm{CH}}$/$L_{\mathrm{CH}}$、中心频点 \\
+G3 & \texttt{power} & 各业务 $P_o$、参考功率、$P_{\mathrm{MAX}}$ \\
+G4 & \texttt{mcsMod} & MCS 索引、调制枚举、阶数 $m$（可派生） \\
+G5 & \texttt{pos} & 定位能力、坐标系、角色、解算节点、同步 $u$ \\
+G6 & \texttt{xrcPos} & XRC 已解析定位子集（指针或内嵌） \\
+\bottomrule
+\end{longtable}
+
+\newpage
+%======================================================================
+\part{字段表}
+%======================================================================
+
+\section{G1 身份}
+
+\begin{longtable}{L{3.0cm}L{2.4cm}L{2.0cm}L{3.2cm}L{2.0cm}L{1.4cm}}
+\caption{G1 身份字段\label{tab:g1}} \\
+\toprule
+\textbf{字段} & \textbf{类型建议} & \textbf{单位} & \textbf{registry id} & \textbf{写} & \textbf{状态} \\
+\midrule
+\endfirsthead
+\multicolumn{6}{c}{\small（续表）G1} \\
+\toprule
+\textbf{字段} & \textbf{类型建议} & \textbf{单位} & \textbf{registry id} & \textbf{写} & \textbf{状态} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\texttt{localPhyId} &
+\texttt{uint16\_t} &
+--- &
+\texttt{slb.session.localPhyId} &
+接入/XRC &
+\texttt{draft} \\
+\texttt{cellId} / \texttt{nId} &
+\texttt{uint16\_t} &
+--- &
+\texttt{slb.session.cellId} &
+系统/接入 &
+\texttt{draft} \\
+\texttt{nGPid} &
+\texttt{uint32\_t} &
+--- &
+\texttt{slb.session.gPid} &
+调度/系统 &
+\texttt{draft} \\
+\end{longtable}
+
+\noindent\textbf{读}：加扰/RS（$N_{\mathrm{ID}}$）、默认数据 $c_{\mathrm{init}}$（$N_{\mathrm{G-PID}}$）、6.6 组内标识。
+
+\section{G2 帧与载波}
+
+\begin{longtable}{L{3.0cm}L{2.6cm}L{1.6cm}L{3.4cm}L{2.0cm}L{1.4cm}}
+\caption{G2 帧与载波字段\label{tab:g2}} \\
+\toprule
+\textbf{字段} & \textbf{类型建议} & \textbf{单位} & \textbf{registry id} & \textbf{写} & \textbf{状态} \\
+\midrule
+\endfirsthead
+\multicolumn{6}{c}{\small（续表）G2} \\
+\toprule
+\textbf{字段} & \textbf{类型建议} & \textbf{单位} & \textbf{registry id} & \textbf{写} & \textbf{状态} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\texttt{symbolType} &
+枚举 &
+--- &
+\texttt{slb.session.symbolType} &
+MAC &
+\texttt{draft} \\
+\texttt{nTti} &
+\texttt{uint8\_t}（0--6） &
+--- &
+\texttt{slb.session.nTti} &
+MAC &
+\texttt{draft} \\
+\texttt{nCh} &
+\texttt{uint8\_t} &
+--- &
+\texttt{slb.session.nCh} &
+MAC &
+\texttt{draft} \\
+\texttt{lCh} &
+\texttt{uint8\_t} &
+--- &
+\texttt{slb.session.lCh} &
+MAC/表定 &
+\texttt{draft} \\
+\texttt{centerFreqHz} &
+\texttt{uint32\_t} 或 \texttt{double} &
+Hz &
+\texttt{slb.session.centerFreqHz} &
+射频/系统 &
+\texttt{tbd} \\
+\end{longtable}
+
+\noindent\textbf{读}：6.2.2 帧网格、OFDM、$N_{\mathrm{CP}}$ 派生、多载波布局。\\
+\textbf{注}：$N_{\mathrm{CH}}$/$L_{\mathrm{CH}}$ 档位表属 L0 查表，本结构只存当前会话选中值。
+
+\section{G3 功率}
+
+\begin{longtable}{L{3.6cm}L{2.2cm}L{1.4cm}L{3.6cm}L{1.8cm}L{1.4cm}}
+\caption{G3 功率字段\label{tab:g3}} \\
+\toprule
+\textbf{字段} & \textbf{类型} & \textbf{单位} & \textbf{registry id} & \textbf{写} & \textbf{状态} \\
+\midrule
+\endfirsthead
+\multicolumn{6}{c}{\small（续表）G3} \\
+\toprule
+\textbf{字段} & \textbf{类型} & \textbf{单位} & \textbf{registry id} & \textbf{写} & \textbf{状态} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\texttt{srsP0NominalDbm} &
+\texttt{double} &
+dBm &
+\texttt{slb.session.p0SrsDbm} &
+XRC/系统 &
+\texttt{draft} \\
+\texttt{rachP0NominalDbm} &
+\texttt{double} &
+dBm &
+\texttt{slb.session.p0RachDbm} &
+同上 &
+\texttt{draft} \\
+\texttt{ackP0NominalDbm} &
+\texttt{double} &
+dBm &
+\texttt{slb.session.p0AckDbm} &
+同上 &
+\texttt{draft} \\
+\texttt{dataClass1P0NominalDbm} &
+\texttt{double} &
+dBm &
+\texttt{slb.session.p0DataClass1Dbm} &
+同上 &
+\texttt{draft} \\
+\texttt{dataClass2P0NominalDbm} &
+\texttt{double} &
+dBm &
+\texttt{slb.session.p0DataClass2Dbm} &
+同上 &
+\texttt{draft} \\
+\texttt{gLinkReferenceSignalPowerDbm} &
+\texttt{double} &
+dBm &
+\texttt{slb.session.gLinkRefSignalPowerDbm} &
+同上 &
+\texttt{draft} \\
+\texttt{pMaxDbm} &
+\texttt{double} &
+dBm &
+\texttt{slb.session.pMaxDbm} &
+射频/法规 &
+\texttt{draft} \\
+\end{longtable}
+
+\noindent\textbf{读}：仅 6.5.4（及依赖功控的发送路径）。\\
+\textbf{强制}：PHY 不得按信道质量改写上述目标功率。
+
+\section{G4 MCS / 调制}
+
+\begin{longtable}{L{3.2cm}L{2.6cm}L{1.6cm}L{3.4cm}L{2.0cm}L{1.4cm}}
+\caption{G4 MCS / 调制字段\label{tab:g4}} \\
+\toprule
+\textbf{字段} & \textbf{类型建议} & \textbf{单位} & \textbf{registry id} & \textbf{写} & \textbf{状态} \\
+\midrule
+\endfirsthead
+\multicolumn{6}{c}{\small（续表）G4} \\
+\toprule
+\textbf{字段} & \textbf{类型建议} & \textbf{单位} & \textbf{registry id} & \textbf{写} & \textbf{状态} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\texttt{mcsIndex} &
+\texttt{uint8\_t} &
+--- &
+\texttt{slb.session.mcsIndex} &
+调度 &
+\texttt{draft} \\
+\texttt{modType} &
+枚举 &
+--- &
+\texttt{slb.session.modType} &
+由 MCS/固定配置 &
+\texttt{draft} \\
+\texttt{modulationOrderM} &
+\texttt{uint8\_t} &
+--- &
+\texttt{slb.session.modulationOrderM} &
+派生可只读缓存 &
+\texttt{draft} \\
+\end{longtable}
+
+\noindent\textbf{读}：6.5.6 / 数据面。\\
+\textbf{强制}：\texttt{【无自主升阶】}。控制面固定阶由调用方传入或单独链路配置，勿与数据 MCS 混用同一字段语义时需文档注明。
+
+\section{G5 定位会话（与 PosContext 对齐）}
+
+\begin{longtable}{L{3.4cm}L{2.6cm}L{1.4cm}L{3.6cm}L{1.8cm}L{1.4cm}}
+\caption{G5 定位字段\label{tab:g5}} \\
+\toprule
+\textbf{字段} & \textbf{类型建议} & \textbf{单位} & \textbf{registry id} & \textbf{写} & \textbf{状态} \\
+\midrule
+\endfirsthead
+\multicolumn{6}{c}{\small（续表）G5} \\
+\toprule
+\textbf{字段} & \textbf{类型建议} & \textbf{单位} & \textbf{registry id} & \textbf{写} & \textbf{状态} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\texttt{ofdmPositioningCapable} &
+\texttt{bool} &
+--- &
+\texttt{slb.session.ofdmPositioningCapable} &
+能力 IE &
+\texttt{draft} \\
+\texttt{posRole} &
+\texttt{SlbPosRole} &
+枚举 &
+\texttt{slb.session.posRole} &
+XRC &
+\texttt{draft} \\
+\texttt{fixNodePhyId} &
+\texttt{uint16\_t} &
+--- &
+\texttt{slb.session.fixNodePhyId} &
+XRC &
+\texttt{draft} \\
+\texttt{posFrameType} &
+\texttt{SlbPosFrameType} &
+ABS/REL &
+\texttt{slb.session.posFrameType} &
+XRC &
+\texttt{draft} \\
+\texttt{anchorXyzM[3]} &
+\texttt{double} &
+m &
+\texttt{slb.session.anchorXyzM} &
+XRC &
+\texttt{draft} \\
+\texttt{hasAnchorCoord} &
+\texttt{bool} &
+--- &
+（配套） &
+XRC &
+\texttt{draft} \\
+\texttt{syncSequenceU} &
+\texttt{uint8\_t} &
+--- &
+\texttt{slb.session.syncSequenceU} &
+G 配置 &
+\texttt{draft} \\
+\end{longtable}
+
+\section{G6 XRC 已解析子集}
+
+建议用指针指向第 7 章解析器产出的只读结构，或内嵌精简副本。字段语义与登记册 \texttt{slb.session.xrc.*} 一致。
+
+\begin{longtable}{L{3.2cm}L{5.5cm}L{3.5cm}L{1.6cm}}
+\caption{G6 XRC 子集（逻辑字段）\label{tab:g6}} \\
+\toprule
+\textbf{逻辑字段} & \textbf{用途} & \textbf{registry id} & \textbf{状态} \\
+\midrule
+\endfirsthead
+\multicolumn{4}{c}{\small（续表）G6} \\
+\toprule
+\textbf{逻辑字段} & \textbf{用途} & \textbf{registry id} & \textbf{状态} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\texttt{roles} & 角色指派 & \texttt{...xrc.roles} & \texttt{draft} \\
+\texttt{staticRes} & 静态时频/端口/波束/载波/带宽/序列 & \texttt{...xrc.staticRes} & \texttt{draft} \\
+\texttt{measItems} & 测量项开关 & \texttt{...xrc.measItems} & \texttt{draft} \\
+\texttt{groupcast} & FLAG 组播 & \texttt{...xrc.groupcast} & \texttt{draft} \\
+\texttt{nonConnectMeas} & 无连接测量 & \texttt{...xrc.nonConnectMeas} & \texttt{draft} \\
+\texttt{nodeCoords} & 节点坐标 & \texttt{...xrc.nodeCoords} & \texttt{draft} \\
+\texttt{reportTarget} & 上报目标 & \texttt{...xrc.reportTarget} & \texttt{draft} \\
+\texttt{hopConfig} & 跳频 / $T_{\mathrm{RF}}$ & \texttt{...xrc.hopConfig} & \texttt{draft} \\
+\texttt{securePms} & 安全 PMS & \texttt{...xrc.securePms} & \texttt{draft} \\
+\end{longtable}
+
+\noindent\textbf{写}：\texttt{slbPhySessionApplyXrcParsed(...)}（建议名）或复用 \texttt{slbPosApplyXrcConfig} 并回写 Session。\\
+\textbf{禁止}：PHY 内 ASN.1 解码。
+
+\newpage
+%======================================================================
+\part{与 PosContext 映射与草稿 API}
+%======================================================================
+
+\section{与 \texttt{SlbPosContext} 映射}
+
+\begin{longtable}{L{4.5cm}L{4.5cm}L{5.2cm}}
+\caption{PosContext $\leftrightarrow$ SessionConfig\label{tab:map}} \\
+\toprule
+\textbf{SlbPosContext（已有）} & \textbf{SessionConfig} & \textbf{规则} \\
+\midrule
+\texttt{localPhyId} & \texttt{identity.localPhyId} & 同一字段，禁止两处不同值 \\
+\texttt{ofdmPositioningCapable} & \texttt{pos.ofdmPositioningCapable} & 同上 \\
+\texttt{frameType} & \texttt{pos.posFrameType} & 同上 \\
+\texttt{fixNodePhyId} & \texttt{pos.fixNodePhyId} & 同上 \\
+\texttt{nodes[]} / 角色坐标 & \texttt{pos} + \texttt{xrcPos} & Pos 可为 Session 的定位视图 \\
+（无）功率/MCS/帧 & G2--G4 & 仅 Session 持有；Pos 不复制 \\
+\bottomrule
+\end{longtable}
+
+\textbf{推荐落地二选一}（初稿建议 A）：
+\begin{enumerate}[nosep]
+  \item \textbf{A}：\texttt{SlbPosContext} 内嵌 \texttt{const SlbPhySessionConfig *} 或共享归属块；
+  \item \textbf{B}：Pos 字段为 Session.pos / Session.xrcPos 的 typedef 别名，无独立存储。
+\end{enumerate}
+
+\section{建议 API（草稿，非最终代码）}
+
+\begin{lstlisting}[language=C,caption={SessionConfig 应用入口（示意）}]
+typedef struct SlbPhySessionConfig SlbPhySessionConfig;
+
+/* 上层：创建/销毁 */
+int32_t slbPhySessionCreate(SlbPhySessionConfig **out);
+void    slbPhySessionDestroy(SlbPhySessionConfig *cfg);
+
+/* 上层写入（已解析入参） */
+int32_t slbPhySessionApplyIdentity(...);
+int32_t slbPhySessionApplyFrameCarrier(...);
+int32_t slbPhySessionApplyPower(...);
+int32_t slbPhySessionApplyMcs(...);
+int32_t slbPhySessionApplyXrcParsed(const void *parsedXrc);
+
+/* 校验：缺必填 / 能力不符 → 错误，不静默沿用旧值 */
+int32_t slbPhySessionValidate(const SlbPhySessionConfig *cfg);
+
+/* PHY 只读访问 */
+const SlbPhySessionConfig *slbPhySessionView(void /* 或显式传入 */);
+\end{lstlisting}
+
+\section{不放入本结构的内容}
+
+\begin{longtable}{L{4.5cm}L{10.2cm}}
+\caption{明确排除项\label{tab:excl}} \\
+\toprule
+\textbf{对象} & \textbf{去向} \\
+\midrule
+L0 常量（$f_s$、161、光速…） & \texttt{slb\_phy\_const}，不进 Session \\
+GCI 格式 0--2 当次资源 & 调用 \texttt{slbPosApplyGciResource} / L3 当前资源槽 \\
+GCI-4 激活位 & 事件入参，非长期配置 \\
+当次功控 $M$（子载波数） & 发送调用参数（L3） \\
+模块内 L2（如 ZC 的 $u,v$ 细节） & 各库私有配置 \\
+\bottomrule
+\end{longtable}
+
+\newpage
+%======================================================================
+\part{协作与下一步}
+%======================================================================
+
+\section{合作者如何改本表}
+
+使用 skill \texttt{slb-param-registry}：
+\begin{enumerate}[nosep]
+  \item Phase A：只增与本模块相关的 L1 字段（标 \texttt{draft}）；
+  \item Phase B：对齐他章后升 \texttt{frozen} 或合并重名；
+  \item 改字段名/语义时同步：L1 登记册 + 本 SessionConfig 表 +（若有）代码。
+\end{enumerate}
+
+\textbf{不是}每个合作者另起一份 SessionConfig；全组共享这一份契约。
+
+\section{本初稿缺口}
+
+\begin{itemize}[nosep]
+  \item $N_{\mathrm{ID}}$/$N_{\mathrm{G-PID}}$ 位宽与正式工程名；
+  \item \texttt{centerFreqHz} 与信道号表（第 8.3 章）；
+  \item XRC 解析结构体的 C 类型定义（第 7.5 章）；
+  \item MCS 表完整映射（6.2.5）；
+  \item 错误码枚举与 validate 规则细表。
+\end{itemize}
+
+\section{建议下一步}
+
+\begin{enumerate}[nosep]
+  \item 组内评审本 PDF 与 L0/L1 登记册是否同名同义；
+  \item 用 \texttt{slb-param-registry} 让各模块负责人补各自 L1/\texttt{draft}；
+  \item （可选）从本表生成 \texttt{slb\_phy\_session.h} 骨架；
+  \item 再补各模块 L2 + 接口暴露。
+\end{enumerate}
+
+\vspace{1.2em}
+{\small\textcolor{gray}{初稿仅供工程对齐与 AI 实现约束；以正式标准与有效分册为准。}}
+
+\end{document}
