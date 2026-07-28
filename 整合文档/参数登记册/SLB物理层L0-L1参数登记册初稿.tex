@@ -28,7 +28,7 @@
 \small 工程用途：AI 分模块实现时的跨模块参数真源（SSOT）初稿；\\
 \small 命名约定 airMode\,=\,\texttt{slb}（nearlink-naming）
 }
-\date{2026 年 7 月 27 日}
+\date{2026 年 7 月 28 日}
 
 \begin{document}
 \maketitle
@@ -48,13 +48,14 @@
   \item \textbf{L1 会话配置}：由上层（MAC / 第 7 章解析 / 调度）下发，PHY 各模块只读消费的量。
 \end{enumerate}
 
-\textbf{不在本册展开}：L2（模块专有可调参数）、L3（运行时测量/命令交换量）。二者见 README 后续安排，随各模块接口暴露文档补入。
+\textbf{不在本册展开}：L2 见 \texttt{SLB物理层L2按模块参数登记册PhaseA粗提}；L3 见 \texttt{SLB物理层L3跨模块交换登记册} 与各分册 \texttt{*参数L0-L3四层整合}。模块 I/O 见各章 \texttt{*模块实现参数汇总}。
 
 \textbf{设计原则}：
 \begin{itemize}[nosep]
   \item 每条参数有稳定 \texttt{id}、建议工程名、单位、归属节号、写者、读者、状态；
   \item L0 禁止业务模块私建同义 magic number；
   \item L1 禁止 PHY 子模块自行改写（如自主升 MCS、改 $P_o$）；
+  \item 依赖他模块时只引其\textbf{输出}；节号须带中文名（如 6.5.3 伪随机QPSK）；
   \item 文档会迭代：\texttt{frozen} / \texttt{draft} / \texttt{tbd} 标明置信度，不要求等齐全员终稿。
 \end{itemize}
 
@@ -88,7 +89,7 @@ L1 & 上层写、PHY 读；建议落入单一 \texttt{SlbPhySessionConfig}（定
 \toprule
 \textbf{来源} & \textbf{贡献} \\
 \midrule
-6.2.2 技术文档 & $f_s$、$T_s$、$\Delta f$、符号/CP、超帧、TTI、161/DC、$N_{\mathrm{CH}}$/$L_{\mathrm{CH}}$ \\
+6.2.2 技术文档 & $f_s$、$T_s$、$\Delta f$、符号/CP/边界 CP、超帧、TTI、切换间隔、161/DC、子载波组、$N_{\mathrm{CH}}$/$L_{\mathrm{CH}}$ 18 档、传输模式/链路布局/域类型 \\
 6.5 章级/分册 & $P_o$、$P_{\mathrm{MAX}}$、参考功率、MCS$\rightarrow$调制阶、$N_{\mathrm{ID}}$ 类消费 \\
 6.6 及接口暴露 & PhyID、角色、能力位、坐标系、XRC 已解析字段子集、光速 \\
 第 7 / 8 章（引用） & XRC/能力 IE 归属、射频 $P_{\mathrm{MAX}}$（本册标 draft/tbd） \\
@@ -168,6 +169,20 @@ $8$ &
 --- &
 6.2.2.2 &
 \texttt{frozen} \\
+\texttt{slb.phy.superframeNumberMax} &
+\texttt{superframeNumberMax} &
+--- &
+$65535$（\#0--\#65535 循环） &
+--- &
+6.2.2.2 &
+\texttt{frozen} \\
+\texttt{slb.phy.switchGapSymbolCount} &
+\texttt{switchGapSymbolCount} &
+--- &
+$1$（链路/节点切换间隔） &
+符号 &
+6.2.2.3 &
+\texttt{frozen} \\
 \end{longtable}
 
 \begin{longtable}{L{3.8cm}L{3.2cm}L{8.2cm}}
@@ -214,7 +229,19 @@ MHz &
 \texttt{frozen} \\
 \texttt{slb.phy.baseSubcarrierGroupCount} &
 \texttt{baseSubcarrierGroupCount} &
-$16$（每 10 有效子载波一组） &
+$16$ &
+--- &
+6.2.2.4 &
+\texttt{frozen} \\
+\texttt{slb.phy.effectiveSubcarriersPerGroupCount} &
+\texttt{effectiveSubcarriersPerGroupCount} &
+$10$（跳过 DC 后每组） &
+--- &
+6.2.2.4 &
+\texttt{frozen} \\
+\texttt{slb.phy.validSubcarrierCount} &
+\texttt{validSubcarrierCount} &
+$160$（$161-1$ DC） &
 --- &
 6.2.2.4 &
 \texttt{frozen} \\
@@ -236,10 +263,11 @@ bit &
 
 \section{符号类型相关常量（查表用）}
 
-以下为 L0\textbf{查表常量}（随符号类型取一行），表体来自 6.2.2.1 / 6.2.2.2；运行时由 L1 的符号类型配置选择行。
+以下为 L0\textbf{查表常量}（随符号类型取一行），表体来自 6.2.2.1 / 6.2.2.2；运行时由 L1 的符号类型配置选择行。\\
+正式查表 id：\texttt{slb.phy.symbolDesignTable}（CP/GAP/时长）、\texttt{slb.phy.symbolsPerRadioFrameByType}（每帧符号数）、\texttt{slb.phy.boundaryCpSymbolIndexTable}（边界 CP 位置）；状态均为 \texttt{frozen}。
 
 \begin{longtable}{L{2.0cm}L{2.4cm}L{2.4cm}L{2.0cm}L{2.4cm}C{1.6cm}}
-\caption{L0：五种符号类型 CP/时长摘要\label{tab:l0-sym}} \\
+\caption{L0：五种符号类型 CP/时长摘要（\texttt{symbolDesignTable}）\label{tab:l0-sym}} \\
 \toprule
 \textbf{类型} & \textbf{一般 CP} & \textbf{一般符号} & \textbf{GAP1} & \textbf{边界符号} & \textbf{$N_{\mathrm{sym}}^{\mathrm{frame}}$} \\
 \midrule
@@ -258,6 +286,26 @@ bit &
 四 & $128T_s$ & $384T_s$ & --- & --- & 10 \\
 \end{longtable}
 
+\begin{longtable}{L{2.2cm}L{2.0cm}L{5.5cm}L{4.5cm}}
+\caption{L0：边界 CP 符号索引（\texttt{boundaryCpSymbolIndexTable}）\label{tab:l0-bcp}} \\
+\toprule
+\textbf{类型} & \textbf{符号数} & \textbf{一般 CP 符号 $l$} & \textbf{边界 CP 符号 $l$} \\
+\midrule
+\endfirsthead
+\multicolumn{4}{c}{\small（续表）边界 CP} \\
+\toprule
+\textbf{类型} & \textbf{符号数} & \textbf{一般 CP 符号 $l$} & \textbf{边界 CP 符号 $l$} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+一 A & 14 & \#1--\#6, \#8--\#13 & \#0, \#7 \\
+一 B & 14 & \#1--\#13 & \#0 \\
+二 & 13 & \#1--\#12 & \#0 \\
+三 & 12 & \#0--\#11 & --- \\
+四 & 10 & \#0--\#9 & --- \\
+\end{longtable}
+
 \begin{longtable}{L{4.5cm}L{10.2cm}}
 \caption{L0：符号类型与 $N_{\mathrm{CP}}$ 映射（供 6.5.3）\label{tab:l0-ncp}} \\
 \toprule
@@ -269,6 +317,39 @@ bit &
 写 / 读 & 无 / RS QPSK、加扰相关初始化 \\
 \bottomrule
 \end{longtable}
+
+\section{$N_{\mathrm{CH}}$ / $L_{\mathrm{CH}}$ 配对表}
+
+\begin{longtable}{L{4.5cm}L{10.2cm}}
+\caption{L0：查表 id\label{tab:l0-nch-id}} \\
+\toprule
+\textbf{id} & \textbf{说明} \\
+\midrule
+\texttt{slb.phy.nChLchPairTable} &
+$N_{\mathrm{CH}}$ 与 $L_{\mathrm{CH}}$ 共 18 档配对；状态 \texttt{frozen}；归属 6.2.2.4；写=无；读=载波聚合、工作子载波组编号 \\
+\bottomrule
+\end{longtable}
+
+\begin{longtable}{c*{18}{c}}
+\caption{L0：$N_{\mathrm{CH}}$ 与 $L_{\mathrm{CH}}$ 对应（\texttt{nChLchPairTable}）\label{tab:l0-nch-lch}} \\
+\toprule
+$N_{\mathrm{CH}}$ &
+1 & 2 & 3 & 4 & 5 & 6 & 7 & 8 & 9 & 10 & 11 & 12 & 13 & 14 & 15 & 16 & 25 & 32 \\
+\midrule
+\endfirsthead
+\multicolumn{19}{c}{\small（续表）$N_{\mathrm{CH}}$/$L_{\mathrm{CH}}$} \\
+\toprule
+$N_{\mathrm{CH}}$ &
+1 & 2 & 3 & 4 & 5 & 6 & 7 & 8 & 9 & 10 & 11 & 12 & 13 & 14 & 15 & 16 & 25 & 32 \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+$L_{\mathrm{CH}}$ &
+1 & 2 & 4 & 4 & 8 & 8 & 8 & 8 & 16 & 16 & 16 & 16 & 16 & 16 & 16 & 16 & 32 & 32 \\
+\end{longtable}
+
+\noindent\textbf{派生}：工作子载波组编号上界 $=\lfloor 16 N_{\mathrm{CH}}/L_{\mathrm{CH}} \rfloor - 1$（$N_{\mathrm{CH}}=25$ 时仍按下式取整）。禁止模块内硬编码残缺子集。
 
 \section{物理常数}
 
@@ -403,9 +484,30 @@ Hz &
 射频/系统 &
 多载波布局 &
 \texttt{tbd} \\
+\texttt{slb.session.transmissionMode} &
+\texttt{transmissionMode} &
+枚举 &
+6.2.2.3 &
+高层/MAC &
+连续/非连续；COT 语义 &
+\texttt{draft} \\
+\texttt{slb.session.linkSymbolLayout} &
+\texttt{linkSymbolLayout} &
+布局 &
+6.2.2.2/3/9 &
+高层/MAC &
+无线帧/TTI 内 G/T/A/D/切换间隔序列 &
+\texttt{draft} \\
+\texttt{slb.session.domainType} &
+\texttt{domainType} &
+枚举 &
+6.2.2.8/10 &
+高层/MAC &
+通信域 / 直通链路（不可混用） &
+\texttt{draft} \\
 \end{longtable}
 
-\noindent\textbf{注}：$N_{\mathrm{CH}}$ 与 $L_{\mathrm{CH}}$ 18 档对应关系见 6.2.2 表（本册不重复抄写全部档位）；实现时应引用同一查表，禁止模块内硬编码残缺子集。
+\noindent\textbf{注}：$N_{\mathrm{CH}}$ 与 $L_{\mathrm{CH}}$ 必须按 L0 \texttt{nChLchPairTable} 配对；\texttt{linkSymbolLayout} 须满足：通信域 TTI 以 G 开头、末符号为切换间隔、异链路/异发送节点间插入 \texttt{switchGapSymbolCount} 个符号。
 
 \section{功率相关（上层下发）}
 
@@ -640,6 +742,9 @@ FLAG 组播 &
 GCI 格式 0--2 资源 & 当次 RTT/角度时频；经 \texttt{slbPosApplyGciResource} 写入会话的``当前资源''槽，勿与 XRC 静态混为同一不可变字段 \\
 GCI 第四格式激活位 & 事件：开测/关测；不作为长期配置常量 \\
 调度给出的当次 $M$（子载波数） & 功控入参；可视为 L3/调用参数，不必全部进入 Session 静态区 \\
+COT 起止无线帧 / 当前 TTI 序号 & 竞争或调度当次占用；见细模块 \texttt{tti.cotBounds}/\texttt{tti.locate}，非 Session 常驻 \\
+当次基础载波 / 工作子载波组 / RE $(k,l)_p$ & 映射与解调调用参数；见 \texttt{carrier.*}/\texttt{re.*} \\
+直通先发/后发角色 & 当次竞争结果；见 \texttt{link.passthrough} \\
 \bottomrule
 \end{longtable}
 
@@ -655,8 +760,8 @@ GCI 第四格式激活位 & 事件：开测/关测；不作为长期配置常量
 \toprule
 \textbf{层} & \textbf{约条目} & \textbf{说明} \\
 \midrule
-L0 & $\sim$20+（含符号类型表） & 时频、网格、符号查表、$N_{\mathrm{CP}}$、光速 \\
-L1 身份/帧/载波 & $\sim$10 & PhyID、小区/G-PID、角色、$N_{\mathrm{TTI}}$、$N_{\mathrm{CH}}$ 等 \\
+L0 & $\sim$30+（含查表） & 时频、网格、符号/边界 CP、$N_{\mathrm{CH}}$/$L_{\mathrm{CH}}$、$N_{\mathrm{CP}}$、光速 \\
+L1 身份/帧/载波 & $\sim$13 & PhyID、小区/G-PID、角色、$N_{\mathrm{TTI}}$、$N_{\mathrm{CH}}$、传输模式/布局/域类型等 \\
 L1 功率/MCS & $\sim$10 & 五类 $P_o$、参考功率、$P_{\mathrm{MAX}}$、MCS/调制 \\
 L1 定位/XRC & $\sim$12 & 能力、坐标、XRC 已解析子集 \\
 \bottomrule

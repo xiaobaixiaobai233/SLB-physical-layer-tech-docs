@@ -40,7 +40,7 @@
 精确字段以 T/XS 10001-2025 与各分册、第 7 章解析结果为准\\[0.25em]
 \small airMode\,=\,\texttt{slb}（nearlink-naming）；提取流程见 skill \texttt{slb-param-registry}
 }
-\date{2026 年 7 月 27 日}
+\date{2026 年 7 月 28 日}
 
 \begin{document}
 \maketitle
@@ -83,7 +83,7 @@
 \midrule
 G0 & --- & 版本 / 校验摘要（可选） \\
 G1 & \texttt{identity} & PhyID、小区/$N_{\mathrm{ID}}$、$N_{\mathrm{G-PID}}$ \\
-G2 & \texttt{frameCarrier} & 符号类型、$N_{\mathrm{TTI}}$、$N_{\mathrm{CH}}$/$L_{\mathrm{CH}}$、中心频点 \\
+G2 & \texttt{frameCarrier} & 符号类型、$N_{\mathrm{TTI}}$、$N_{\mathrm{CH}}$/$L_{\mathrm{CH}}$、中心频点、传输模式、链路布局、域类型 \\
 G3 & \texttt{power} & 各业务 $P_o$、参考功率、$P_{\mathrm{MAX}}$ \\
 G4 & \texttt{mcsMod} & MCS 索引、调制枚举、阶数 $m$（可派生） \\
 G5 & \texttt{pos} & 定位能力、坐标系、角色、解算节点、同步 $u$ \\
@@ -178,10 +178,28 @@ Hz &
 \texttt{slb.session.centerFreqHz} &
 射频/系统 &
 \texttt{tbd} \\
+\texttt{transmissionMode} &
+枚举（连续/非连续） &
+--- &
+\texttt{slb.session.transmissionMode} &
+MAC &
+\texttt{draft} \\
+\texttt{linkSymbolLayout} &
+布局/数组 &
+--- &
+\texttt{slb.session.linkSymbolLayout} &
+MAC &
+\texttt{draft} \\
+\texttt{domainType} &
+枚举（通信域/直通） &
+--- &
+\texttt{slb.session.domainType} &
+MAC &
+\texttt{draft} \\
 \end{longtable}
 
-\noindent\textbf{读}：6.2.2 帧网格、OFDM、$N_{\mathrm{CP}}$ 派生、多载波布局。\\
-\textbf{注}：$N_{\mathrm{CH}}$/$L_{\mathrm{CH}}$ 档位表属 L0 查表，本结构只存当前会话选中值。
+\noindent\textbf{读}：6.2.2 帧网格、OFDM、$N_{\mathrm{CP}}$ 派生、多载波布局、TTI/链路时分校验。\\
+\textbf{注}：$N_{\mathrm{CH}}$/$L_{\mathrm{CH}}$ 档位表属 L0 \texttt{nChLchPairTable}，本结构只存当前会话选中值；\texttt{linkSymbolLayout} 须满足 G 开头与末切换间隔等强制结构。
 
 \section{G3 功率}
 
@@ -430,11 +448,13 @@ const SlbPhySessionConfig *slbPhySessionView(void /* 或显式传入 */);
 \toprule
 \textbf{对象} & \textbf{去向} \\
 \midrule
-L0 常量（$f_s$、161、光速…） & \texttt{slb\_phy\_const}，不进 Session \\
+L0 常量（$f_s$、161、光速…）及查表 & \texttt{slb\_phy\_const} / L0 表，不进 Session \\
 GCI 格式 0--2 当次资源 & 调用 \texttt{slbPosApplyGciResource} / L3 当前资源槽 \\
 GCI-4 激活位 & 事件入参，非长期配置 \\
 当次功控 $M$（子载波数） & 发送调用参数（L3） \\
-模块内 L2（如 ZC 的 $u,v$ 细节） & 各库私有配置 \\
+COT 起止帧 / TTI 序号 / RE $(k,l)_p$ & 细模块 \texttt{tti.*}/\texttt{re.*}（偏 L3），非 Session 常驻 \\
+直通先发/后发角色 & \texttt{link.passthrough} 当次参数 \\
+模块内 L2（如 ZC 的 $u,v$ 细节） & 各细模块（如 \texttt{zc.generate}）私有配置 \\
 \bottomrule
 \end{longtable}
 

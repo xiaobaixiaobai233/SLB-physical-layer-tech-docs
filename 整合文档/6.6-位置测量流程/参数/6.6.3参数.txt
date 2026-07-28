@@ -1,0 +1,70 @@
+# 6.6.3 角度信息测量 — 模块实现参数清单（详尽 I/O）
+# 含 6.6.3.1 AoA / 6.6.3.2 AoD
+# airMode=slb；嵌套：只引用他模块输出
+
+════════════════════════════════════════
+6.6.3.1 AoA（到达角）
+建议 API: slbPosBuildAoaAirPlan / slbPosOnAoaEstimate
+════════════════════════════════════════
+
+【本模块输出】
+  aoaAirCommands[]           TX/RX 命令（典型：标签发 PMS，锚点收）
+  aoaAzimuthDeg              水平角 ∈ [0,360)，相对 X=正南逆时针
+  aoaElevationDeg            垂直角 ∈ [0,180]，相对 Z=法线
+  aoaMeasIe                  角度 IE：两角 + 测量节点 phyId + 可选质量
+  aoaMeasSet[]               解算侧汇聚集（单锚 1 条；多锚 N 条）
+
+【本模块输入 — 直接】
+  L1: SlbPosContext（角色：谁发谁收）
+  L1: aoA-Estimation 能力位（为假拒配）
+  L1/当次: txRxResourceDesc  符号区间、端口列表
+  L3: aoaEstimateFromPhy     收端估角结果（度）写入本模块 IE
+
+【本模块输入 — 他模块输出】
+  引用 → 6.6.1 输出: SlbPosContext / 可选测量项 AoA 开关 / 动态资源
+  引用 → 6.2.3.9 输出: pmsMappedRe（单向 PMS）
+  引用 → 6.5.5.8 输出: aoaAzimuthDeg / aoaElevationDeg（测量原语语义）
+  引用 → 6.2.3/SAB 输出: syncReadyFlag（与 6.6.2 联用时硬前置；纯单跳 AoA 可产品弱化）
+
+【数据流】
+  A1 发 PMS → 空口符号（发送侧可选记 TOD，若同会话测距）
+  A2 收端估角 → (azimuth, elevation) + nodeId
+  A3 上报汇聚 → aoaMeasSet[] → 交 6.6.4
+
+【坐标系（L0 约定，与 6.5.5.8 一致）】
+  Z=椭球法线；X=正南；Y=正东
+
+════════════════════════════════════════
+6.6.3.2 AoD（出发角 / 波束）
+建议 API: slbPosBuildAodAirPlan / slbPosOnAodBeamIndex
+════════════════════════════════════════
+
+【本模块输出】
+  aodAirCommands[]           按波束序号顺序发基于波束的 PMS
+  beamIndex                  匹配波束序号，实现约定 0..N_beam-1
+  aodMeasIe                  AoD IE：beamIndex + 测量节点 phyId
+  aodMeasSet[]               汇聚集（单锚/多锚）
+
+【本模块输入 — 直接】
+  L1: SlbPosContext
+  L1: aoD-Estimation 能力位（为假拒配）
+  L1: beamTable[] / beamCount N_beam   与发送侧配置一致
+  L1/当次: beamPmsResourceDesc
+  L3: matchedBeamIndexFromPhy  收端波束匹配判决结果
+
+【本模块输入 — 他模块输出】
+  引用 → 6.6.1 输出: 波束表 / 资源 / AoD 任务开关
+  引用 → 6.2.3.9 输出: pmsMappedRe（必须基于波束的 PMS）
+  （标准输出是波束序号，不是 6.5.5.8 连续角；序号→名义角映射属实现/6.6.4）
+
+【强制】
+  AoD 必须基于波束 PMS；禁止用非波束 PMS 伪造成 AoD
+
+【数据流】
+  D1 按波束发 PMS 序列
+  D2 收端匹配 → beamIndex
+  D3 上报汇聚 → aodMeasSet[] → 交 6.6.4
+
+【与测距解耦】
+  6.6.3 测角流水线与 6.6.2 测距并列；单锚解算（6.6.4.1）强制联用角度+距离时，
+  距离只引用 → 6.6.2 输出 distanceM（不在本模块内算距）

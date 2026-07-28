@@ -1,0 +1,54 @@
+# 6.5.6 调制方式 — 模块实现参数清单（补全）
+# airMode=slb；命名遵循 nearlink-naming
+# 规则：实现本模块所需参数全部列出；若依赖他模块算出的量，只写「他模块输出」，不展开他模块入参。
+
+────────────────────────────────────────
+6.5.6 调制方式（QPSK / 16QAM … 4096QAM）
+建议 API: slbSelectModType / slbGenerateModulatedSymbols
+────────────────────────────────────────
+【本模块输出】
+  modulatedSymbols[]         d(i)，平均能量为 1 的复数符号
+  bitsPerSymbolM             m ∈ {2,4,6,8,10,12}
+  symbolCount                N_sym = N_bit / m
+
+【本模块直接入参】
+  L1: modType / mcsIndex→modType（六种枚举之一；PHY 禁止自改 MCS）
+  L3: bits[]（长度 N_bit；须 N_bit mod m = 0；比特∈{0,1}）
+  数据面强制：
+    引用 → 6.5.7 输出: scrambledBits[]（必须先加扰再调制；禁止对原始编码比特直接调制）
+  控制面：
+    引用 → 6.2.6 输出: 编码后比特（若控制不经 6.5.7，仅引用编码输出）
+    或 引用 → 6.2.4 配置: 固定 QPSK / TCI 二阶段 QPSK|16QAM 规则
+
+【本模块 L0 常量（星座归一化）】
+  modNormQpsk                1/√2（公式带整体负号；≠ 6.5.3）
+  modNorm16Qam               1/√10
+  modNorm64Qam               1/√42
+  modNorm256Qam              1/√170
+  modNorm1024Qam             1/√682
+  modNorm4096Qam             1/√2730
+
+【子节对照】
+  6.5.6.1 QPSK      m=2
+  6.5.6.2 16QAM     m=4
+  6.5.6.3 64QAM     m=6
+  6.5.6.4 256QAM    m=8
+  6.5.6.5 1024QAM   m=10
+  6.5.6.6 4096QAM   m=12
+
+【链路选用（引用配置，不展开 MCS 表）】
+  引用 → 6.2.4：同步/广播/接入/GCI → QPSK；TCI 二阶段 → QPSK 或 16QAM
+  引用 → 6.2.5：第一/二类数据 → MCS 表决定阶
+
+【下游只引用本模块输出】
+  引用方 → 6.2.3 RE 映射消费 modulatedSymbols[]
+  引用方 → 6.5.8（可选）对 d(i) 做 SC-FDMA
+  引用方 → 6.5.4 对平均能量 1 的符号再按功控缩放幅度
+
+【禁止】
+  与 6.5.3 参考 QPSK API 混用（6.5.3 无整体负号；本节有负号）
+  参考信号调用本节接口
+  手改离线 LUT 数值（应用标准公式生成）
+
+【金标】
+  QPSK b=(1,0) → d ≈ (-0.707, +0.707)

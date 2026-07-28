@@ -1,0 +1,235 @@
+% !TEX program = xelatex
+\documentclass[10pt,a4paper]{ctexart}
+
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{enumitem}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{xurl}
+\usepackage{hyperref}
+
+\geometry{left=1.8cm,right=1.8cm,top=2.2cm,bottom=2.2cm}
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue}
+
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\urlstyle{tt}
+\newcommand{\eng}[1]{\begingroup\footnotesize\path{#1}\endgroup}
+\newcommand{\modref}[2]{\textit{#1~#2}}
+
+\title{%
+  \textbf{星闪 SLB 物理层}\\[0.3em]
+  \Large 6.5 模块实现参数汇总\\[0.2em]
+  \large CRC/Gold/QPSK \textbullet\ 功控测量 \textbullet\ 调制 \textbullet\ 加扰/SC-FDMA/ZC
+}
+\author{依据 6.5 分册技术文档补全；airMode\,=\,\texttt{slb}\\
+\small 规则：本模块参数列全；依赖他模块时只写其\textbf{输出}
+}
+\date{2026 年 7 月 28 日}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+\section{约定}
+本模块输出 / 直接入参 / 引用他模块输出（不展开上游内部）。
+
+%----------------------------------------------------------------------
+\part{6.5.1--6.5.3}
+%----------------------------------------------------------------------
+
+\section{6.5.1 CRC}
+\textbf{API}：\eng{slbCalculateCrc} / \eng{slbValidateCrc}
+
+\begin{longtable}{L{3.5cm}L{11.7cm}}
+\caption{6.5.1}\label{tab:651} \\
+\toprule \textbf{角色} & \textbf{内容} \\ \midrule
+\endfirsthead
+\toprule \textbf{角色} & \textbf{内容} \\ \midrule
+\endhead
+\bottomrule\endfoot
+输出 &
+\eng{crcEncodedBits[]}（$B{=}A{+}L$）；
+\eng{crcPass}；
+\eng{crcParityLengthL} \\
+直接入参 &
+\eng{infoBits[]}/\eng{infoBitCount}；
+\eng{crcPoly}（24A/24B/16/8/6）；
+条件 \eng{phyIdMaskBits}（仅 $L{=}24$） \\
+他模块 &
+\modref{6.2.4}{物理层控制信息}/\modref{6.2.5}{物理层数据} 已组装比特；
+下游 \modref{6.2.6}{信道编码} 消费编码输出 \\
+\end{longtable}
+
+\section{6.5.2 Gold}
+\textbf{API}：\eng{slbGenerateGoldSequence}
+
+\begin{longtable}{L{3.5cm}L{11.7cm}}
+\caption{6.5.2}\label{tab:652} \\
+\toprule \textbf{角色} & \textbf{内容} \\ \midrule
+\endfirsthead
+\toprule \textbf{角色} & \textbf{内容} \\ \midrule
+\endhead
+\bottomrule\endfoot
+输出 & \eng{goldBits[]}；$x_1$ 预计算表（实现可选） \\
+直接入参 & \eng{cInit}、\eng{pnLength}（调用方已算好 $c_{\mathrm{init}}$） \\
+L0 & 1600 偏移强制；$x_1$ 初态固定 \\
+消费者 & \modref{6.5.3}{伪随机QPSK}（322）、\modref{6.5.7}{比特加扰}、\modref{6.5.9.1}{ZC组跳} \\
+\end{longtable}
+
+\section{6.5.3 伪随机 QPSK}
+\textbf{API}：\eng{slbCalculateRsCinit} / \eng{slbGenerateRsQpsk} / \eng{slbMapRsQpskToRe}
+
+\begin{longtable}{L{3.5cm}L{11.7cm}}
+\caption{6.5.3}\label{tab:653} \\
+\toprule \textbf{角色} & \textbf{内容} \\ \midrule
+\endfirsthead
+\toprule \textbf{角色} & \textbf{内容} \\ \midrule
+\endhead
+\bottomrule\endfoot
+输出 &
+\eng{rsCinit}；
+\eng{rsQpskSequence[161]}；
+按 $k$ 映射（$k{=}80\to0$） \\
+直接入参 &
+$n,l$；L1 \eng{gNodeIdLow8}；
+\modref{6.2.2.1}{波形和符号}\eng{nCp}；
+\modref{6.2.2.2}{无线帧和超帧}\eng{nSymFrame}；
+\modref{6.5.2}{Gold序列}\eng{goldBits[]}（$M_{\mathrm{PN}}{=}322$） \\
+禁混 & 不得与 \modref{6.5.6.1}{QPSK调制} API 混用 \\
+\end{longtable}
+
+%----------------------------------------------------------------------
+\part{6.5.4--6.5.5}
+%----------------------------------------------------------------------
+
+\section{6.5.4 功率控制}
+\textbf{API}：\eng{slbCalculatePathloss} / \eng{slbCalculateTxPower} / \eng{slbApplyPmaxLimit}
+
+\begin{longtable}{L{3.5cm}L{11.7cm}}
+\caption{6.5.4}\label{tab:654} \\
+\toprule \textbf{角色} & \textbf{内容} \\ \midrule
+\endfirsthead
+\toprule \textbf{角色} & \textbf{内容} \\ \midrule
+\endhead
+\bottomrule\endfoot
+输出 &
+\eng{pathlossDb}；
+\eng{txPowerTotalDbm}；
+\eng{txPowerPerScLin[]}；
+限幅总功率 \\
+直接入参 &
+L1 \eng{gLinkReferenceSignalPowerDbm}、各业务 \eng{*P0NominalDbm}、\eng{pMaxDbm}；
+调度 $M,K$、多业务线性功率 \\
+他模块 & \modref{6.5.5.1}{RSRP}\eng{rsrpDbm} \\
+\end{longtable}
+
+\section{6.5.5 测量量}
+
+\begin{longtable}{L{2.2cm}L{4.5cm}L{8.5cm}}
+\caption{6.5.5}\label{tab:655} \\
+\toprule \textbf{子节} & \textbf{输出} & \textbf{入参/他模块} \\ \midrule
+\endfirsthead
+\toprule \textbf{子节} & \textbf{输出} & \textbf{入参/他模块} \\ \midrule
+\endhead
+\bottomrule\endfoot
+RSRP & \eng{rsrpDbm} & 训练 RE 功率；\modref{6.2.3.1}{FTS/STS} 训练位置 \\
+RSSI & \eng{rssiDbm} & 整符号功率；\modref{6.2.2.1}{波形和符号} 符号粒度 \\
+RSRQ & \eng{rsrq} & \modref{6.5.5.1}{RSRP}/\modref{6.5.5.2}{RSSI} 同符号 \\
+SINR & \eng{sinr} & 同上；分母$\le0$ 判错 \\
+CBRA & \eng{cbra} & 门限 $-87/-62$\,dBm；DT/帧长 \\
+PMS CSI & \eng{pmsIqLinear}/\eng{pmsRplDbm} & 模式1/2；\modref{6.2.3.9}{PMS波形} \\
+时间差 & $T$ 或 $T_1,T_2$ & $t_1{\ldots}t_6$、角色；下游 \modref{6.6}{位置测量流程} \\
+AoA & 水平/垂直角 & 阵列快照；坐标系约定 \\
+\end{longtable}
+
+%----------------------------------------------------------------------
+\part{6.5.6}
+%----------------------------------------------------------------------
+
+\section{6.5.6 调制}
+\textbf{API}：\eng{slbSelectModType} / \eng{slbGenerateModulatedSymbols}
+
+\begin{longtable}{L{3.5cm}L{11.7cm}}
+\caption{6.5.6}\label{tab:656} \\
+\toprule \textbf{角色} & \textbf{内容} \\ \midrule
+\endfirsthead
+\toprule \textbf{角色} & \textbf{内容} \\ \midrule
+\endhead
+\bottomrule\endfoot
+输出 &
+\eng{modulatedSymbols[]}；
+\eng{bitsPerSymbolM}；
+\eng{symbolCount} \\
+直接入参 &
+L1 \eng{modType}；
+比特流（$N_{\mathrm{bit}}\bmod m{=}0$） \\
+他模块 &
+数据面必须 \modref{6.5.7}{比特加扰}\eng{scrambledBits[]}；
+控制面 \modref{6.2.6}{信道编码}/\modref{6.2.4}{物理层控制信息} \\
+L0 & $1/\sqrt{2,10,42,170,682,2730}$；公式含整体负号 \\
+下游 & \modref{6.2.3}{物理层信号} 映射；可选 \modref{6.5.8}{SC-FDMA}；\modref{6.5.4}{功率控制} 再缩放 \\
+\end{longtable}
+
+%----------------------------------------------------------------------
+\part{6.5.7--6.5.9}
+%----------------------------------------------------------------------
+
+\section{6.5.7 比特加扰}
+\textbf{API}：\eng{slbCalculateScrambleCinit} / \eng{slbScrambleBits}
+
+\begin{longtable}{L{3.5cm}L{11.7cm}}
+\caption{6.5.7}\label{tab:657} \\
+\toprule \textbf{角色} & \textbf{内容} \\ \midrule
+\endfirsthead
+\toprule \textbf{角色} & \textbf{内容} \\ \midrule
+\endhead
+\bottomrule\endfoot
+输出 & \eng{scrambleCinit}；\eng{scrambledBits[]} \\
+直接入参 & 编码比特；业务类型；$n_f$、$N_{\mathrm{G-PID}}$ 等 \\
+他模块 & \modref{6.5.2}{Gold序列}\eng{goldBits[]}；\modref{6.2.5}{物理层数据}/\modref{6.2.6}{信道编码} 比特 \\
+隔离 & 与 6.5.3 / 6.5.9.1 的 $c_{\mathrm{init}}$ 禁止混流 \\
+\end{longtable}
+
+\section{6.5.8 SC-FDMA}
+\textbf{API}：\eng{slbGenerateScFdmaPrecoded}
+
+\begin{longtable}{L{3.5cm}L{11.7cm}}
+\caption{6.5.8}\label{tab:658} \\
+\toprule \textbf{角色} & \textbf{内容} \\ \midrule
+\endfirsthead
+\toprule \textbf{角色} & \textbf{内容} \\ \midrule
+\endhead
+\bottomrule\endfoot
+输出 & \eng{scFdmaSymbols[]}；$M$；$L{=}M_{\mathrm{symb}}/M$ \\
+直接入参 & $M_{\mathrm{SC}}^{\mathrm{Total}}$；\modref{6.5.6}{调制}\eng{modulatedSymbols[]} \\
+约束 & $M_{\mathrm{symb}}$ 整除 $M$；强制 $1/\sqrt{M}$；不做 IFFT/CP \\
+\end{longtable}
+
+\section{6.5.9 / 6.5.9.1 ZC 与组跳}
+\textbf{API}：\eng{slbGenerateZcSequence} / \eng{slbCalculateZcGroupHop}
+
+\begin{longtable}{L{3.5cm}L{11.7cm}}
+\caption{6.5.9}\label{tab:659} \\
+\toprule \textbf{角色} & \textbf{内容} \\ \midrule
+\endfirsthead
+\toprule \textbf{角色} & \textbf{内容} \\ \midrule
+\endhead
+\bottomrule\endfoot
+ZC 输出 & \eng{zcBaseSequence[]}；\eng{zcCyclicShifted[]} \\
+ZC 入参 & $u,v,\alpha,m,M_{\mathrm{SC}}^{\mathrm{RS}}$；$m{=}2$ 必须查表 \\
+组跳输出 & \eng{groupHopCinit}；\eng{groupIndexU} \\
+组跳入参 & $n_{\mathrm{ID}}^X$、$n_S$；\modref{6.5.2}{Gold序列}\eng{goldBits[]} \\
+\end{longtable}
+
+\section{嵌套依赖示意}
+\begin{center}\small
+6.5.2 Gold $\rightarrow$ 6.5.3 / 6.5.7 / 6.5.9.1（三 $c_{\mathrm{init}}$ 隔离）\\[0.3em]
+6.5.5.1 RSRP $\rightarrow$ 6.5.4 功控；同符号 RSSI $\rightarrow$ RSRQ/SINR\\[0.3em]
+6.5.7 $\rightarrow$ 6.5.6 $\rightarrow$（可选 6.5.8）$\rightarrow$ 映射/功控
+\end{center}
+
+\end{document}

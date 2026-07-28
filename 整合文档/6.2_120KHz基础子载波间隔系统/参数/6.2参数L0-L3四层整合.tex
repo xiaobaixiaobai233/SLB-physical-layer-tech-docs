@@ -1,0 +1,401 @@
+% !TEX program = xelatex
+\documentclass[10pt,a4paper]{ctexart}
+
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{enumitem}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{xurl}
+\usepackage{hyperref}
+
+\geometry{left=1.8cm,right=1.8cm,top=2.2cm,bottom=2.2cm}
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue}
+
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newcolumntype{C}[1]{>{\centering\arraybackslash}p{#1}}
+% 等宽长串可在列宽内断行，避免叠字
+\urlstyle{tt}
+\newcommand{\eng}[1]{\begingroup\footnotesize\path{#1}\endgroup}
+\newcommand{\tid}[1]{\begingroup\footnotesize\path{#1}\endgroup}
+% id 与工程名上下叠排（长 id 表专用）
+\newcommand{\ideng}[2]{\tid{#1}\newline\eng{#2}}
+
+\title{%
+  \textbf{星闪 SLB 物理层}\\[0.3em]
+  \Large 6.2 相关参数四层整合登记（L0--L3）\\[0.2em]
+  \large 120\,kHz 基础子载波间隔系统 \textbullet\ Phase A
+}
+\author{从来源：6.2.2 / 6.2.3 / 6.2.7--10 模块参数清单整合去重\\
+airMode\,=\,\texttt{slb}（nearlink-naming + slb-param-registry）\\
+\small 精确数值以 T/XS 10001-2025 与分册为准；状态默认 \texttt{draft}，L0 无争议标 \texttt{frozen}
+}
+\date{2026 年 7 月 28 日}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+\section{四层模型（本册）}
+
+\begin{longtable}{C{1.2cm}L{3.2cm}L{5.5cm}L{5cm}}
+\caption{L0--L3 约定}\label{tab:layers} \\
+\toprule
+\textbf{层} & \textbf{含义} & \textbf{写} & \textbf{读} \\
+\midrule
+L0 & 系统常量 & 无（只读表） & 全 PHY \\
+L1 & 会话/上层下发 $\to$ \eng{SlbPhySessionConfig} & MAC/第7章/调度 & PHY 只读 \\
+L2 & 模块专有可调 & 本模块 owner & 本模块+边界导出 \\
+L3 & 运行时交换（当次测量/命令/索引） & 生产者 & 消费者 \\
+\bottomrule
+\end{longtable}
+
+\textbf{整合范围}：6.2.2、6.2.3、6.2.7--10 实现用到的参数；他章（6.5.3、6.2.4、8.3 等）仅登记\textbf{本范围消费的边界输出名}，不展开他章内部。
+
+%======================================================================
+\part{L0 系统常量}
+%======================================================================
+
+\section{时间与频率}
+
+\begin{longtable}{L{6.8cm}L{2.6cm}L{1.5cm}L{1.8cm}L{1.6cm}}
+\caption{L0 时频}\label{tab:l0-tf} \\
+\toprule
+\textbf{id / 工程名} & \textbf{取值} & \textbf{单位} & \textbf{归属} & \textbf{状态} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{id / 工程名} & \textbf{取值} & \textbf{单位} & \textbf{归属} & \textbf{状态} \\
+\midrule
+\endhead
+\bottomrule\endfoot
+\ideng{slb.phy.fsHz}{fsHz} & $30.72\times10^{6}$ & Hz & 6.1 & frozen \\
+\ideng{slb.phy.tsSec}{tsSec} & $1/f_s$ & s & 6.1 & frozen \\
+\ideng{slb.phy.deltaFHz}{deltaFHz} & $120\times10^{3}$ & Hz & 6.2.2.1 & frozen \\
+\ideng{slb.phy.ofdmUsefulLenTs}{ofdmUsefulLenTs} & 256 & $T_s$ & 6.2.2.1 & frozen \\
+\ideng{slb.phy.ofdmUsefulDurationUs}{ofdmUsefulDurationUs} & $\approx8.333$ & $\mu$s & 6.2.2.1 & frozen \\
+\ideng{slb.phy.superframeDurationUs}{superframeDurationUs} & 1000 & $\mu$s & 6.2.2.2 & frozen \\
+\ideng{slb.phy.radioFramesPerSuperframe}{radioFramesPerSuperframe} & 8 & --- & 6.2.2.2 & frozen \\
+\ideng{slb.phy.superframeNumberMax}{superframeNumberMax} & 65535 & --- & 6.2.2.2 & frozen \\
+\ideng{slb.phy.switchGapSymbolCount}{switchGapSymbolCount} & 1 & 符号 & 6.2.2.3 & frozen \\
+\ideng{slb.phy.interDomainTrackPeriodUs}{interDomainTrackPeriodUs} & 250 & $\mu$s & 6.2.8 & frozen \\
+\ideng{slb.phy.postCotTrackWindowCount}{postCotTrackWindowCount} & 4 & --- & 6.2.8 & frozen \\
+\end{longtable}
+
+\section{符号设计表（按 symbolType 查）}
+
+\begin{longtable}{L{6.5cm}L{2.2cm}L{6.5cm}}
+\caption{L0 符号设计常量（表驱动）}\label{tab:l0-sym} \\
+\toprule
+\textbf{id / 工程名} & \textbf{归属} & \textbf{说明} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{id / 工程名} & \textbf{归属} & \textbf{说明} \\
+\midrule
+\endhead
+\bottomrule\endfoot
+\ideng{slb.phy.generalCpLenTsTable}{generalCpLenTs} & 6.2.2.1 & 类型一A/B/二/三/四：18/18/39/64/128 \\
+\ideng{slb.phy.generalSymbLenTsTable}{generalSymbLenTs} & 6.2.2.1 & 274/274/295/320/384 \\
+\ideng{slb.phy.gap1LenTsTable}{gap1LenTs} & 6.2.2.1 & 20/22/44/—/— \\
+\ideng{slb.phy.boundarySymbLenTsTable}{boundarySymbLenTs} & 6.2.2.1 & 276/278/300/—/— \\
+\ideng{slb.phy.nSymFrameTable}{nSymFrame} & 6.2.2.2 & 14/14/13/12/10 \\
+\ideng{slb.phy.boundaryCpIndexTable}{boundaryCpSymbolIndices} & 6.2.2.2 & 一A:\#0,\#7；一B/二:\#0；三/四:无 \\
+\ideng{slb.phy.nCpFromSymbolType}{nCp} & 6.2.2$\leftrightarrow$6.5.3 & 一A/B$\to$3；二$\to$2；三$\to$1；四$\to$0 \\
+\end{longtable}
+
+\section{网格与载波}
+
+\begin{longtable}{L{6.8cm}L{2.2cm}L{1.5cm}L{1.8cm}L{1.6cm}}
+\caption{L0 网格与载波}\label{tab:l0-grid} \\
+\toprule
+\textbf{id / 工程名} & \textbf{取值} & \textbf{单位} & \textbf{归属} & \textbf{状态} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{id / 工程名} & \textbf{取值} & \textbf{单位} & \textbf{归属} & \textbf{状态} \\
+\midrule
+\endhead
+\bottomrule\endfoot
+\ideng{slb.phy.baseChannelBwMHz}{baseChannelBwMHz} & 20 & MHz & 6.2.2.4 & frozen \\
+\ideng{slb.phy.subcarrierCount}{subcarrierCount} & 161 & --- & 6.2.2.4 & frozen \\
+\ideng{slb.phy.dcSubcarrierIndex}{dcSubcarrierIndex} & 80 & --- & 6.2.2.4 & frozen \\
+\ideng{slb.phy.baseSubcarrierGroupCount}{baseSubcarrierGroupCount} & 16 & --- & 6.2.2.4 & frozen \\
+\ideng{slb.phy.effectiveScPerGroup}{effectiveScPerGroup} & 10 & --- & 6.2.2.4 & frozen \\
+\ideng{slb.phy.ifftSize}{ifftSize} & 256 & --- & 6.2.9 & frozen \\
+\ideng{slb.phy.nChLchPairTable}{nCh/lCh} & 18档见表 & --- & 6.2.2.4 & frozen \\
+\end{longtable}
+
+\section{同步 / FTS-STS 常量}
+
+\begin{longtable}{L{6.5cm}L{2.2cm}L{6.5cm}}
+\caption{L0 同步相关常量}\label{tab:l0-sync} \\
+\toprule
+\textbf{id / 工程名} & \textbf{归属} & \textbf{说明} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{id / 工程名} & \textbf{归属} & \textbf{说明} \\
+\midrule
+\endhead
+\bottomrule\endfoot
+\ideng{slb.phy.ftsRootIndexUSet}{ftsRootIndexU} & 6.2.3.1 & $\{1,160,2,159\}$ 场景映射表 \\
+\tid{slb.phy.stsRootIndexUMax} & 6.2.3.1 & STS $u=1..16$ \\
+\tid{slb.phy.pmsRootIndexURange} & 6.2.3.9 & PMS $u\in[3,20]$ \\
+\tid{slb.phy.syncIdBitWidth} & 6.2.8 & 32 bit（高8+低24） \\
+\tid{slb.phy.timingAdjustStepMaxTs} & 6.2.8 & 典型 $\le4\,T_s$ \\
+\tid{slb.phy.freqOffsetAdjustStepMaxPpm} & 6.2.8 & 典型 $\le0.1$\,ppm \\
+\end{longtable}
+
+%======================================================================
+\part{L1 会话配置（上层下发）}
+%======================================================================
+
+\section{帧 / 带宽 / 传输}
+
+\begin{longtable}{L{7.2cm}L{1.6cm}L{2cm}L{2.4cm}L{1.6cm}}
+\caption{L1 帧与带宽}\label{tab:l1-frame} \\
+\toprule
+\textbf{id / 工程名} & \textbf{单位} & \textbf{写} & \textbf{读者} & \textbf{状态} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{id / 工程名} & \textbf{单位} & \textbf{写} & \textbf{读者} & \textbf{状态} \\
+\midrule
+\endhead
+\bottomrule\endfoot
+\ideng{slb.session.symbolType}{symbolType} & enum & 上层 & 6.2.2/3/9 & draft \\
+\ideng{slb.session.nTti}{nTti} & 0..6 & 上层 & 6.2.2.3 & draft \\
+\ideng{slb.session.transmissionMode}{transmissionMode} & enum & 上层 & 6.2.2.3/7 & draft \\
+\ideng{slb.session.nCh}{nCh} & --- & 上层 & 6.2.2.4/7 & draft \\
+\ideng{slb.session.lCh}{lCh} & --- & 上层 & 6.2.2.4 & draft \\
+\ideng{slb.session.linkLayout}{linkSymbolLayout} & --- & 调度 & 6.2.2.2/3/9 & draft \\
+\ideng{slb.session.domainType}{domainType} & enum & 上层 & 6.2.2.8/10 & draft \\
+\ideng{slb.session.gNodeId}{gNodeId} & --- & 上层 & 6.2.2.8/3.1/7 & draft \\
+\end{longtable}
+
+\section{参考信号 / 控制配置 IE（已解析字段）}
+
+\begin{longtable}{L{7.5cm}L{7.7cm}}
+\caption{L1 RS/控制配置}\label{tab:l1-rs} \\
+\toprule
+\textbf{id / 工程名} & \textbf{说明} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{id / 工程名} & \textbf{说明} \\
+\midrule
+\endhead
+\bottomrule\endfoot
+\ideng{slb.session.srsSetConf}{srsSetConf} & 高层 srs-Set-Conf（梳齿/资源/激活） \\
+\ideng{slb.session.csiRsSetConf}{csiRsSetConf} & csi-RS-Set-Conf \\
+\ideng{slb.session.dmrsDGlinkDataSetConf}{dmrsDGlinkDataSetConf} & 含 $N_{\mathrm{comb}}$ 等 \\
+\ideng{slb.session.dmrsDTLinkDataSetConf}{dmrsDTLinkDataSetConf} & 同上 T 链路 \\
+\ideng{slb.session.dmrsTimeGranularity}{dmrsTimeGranularity} & DMRS-TimeGranularity \\
+\ideng{slb.session.dmrsDPortCount}{dmrsDPortCount} & $N_{\mathrm{port}}$ \\
+\ideng{slb.session.dedicatedAckResourceSetConf}{dedicatedAckResourceSetConf} & T-DMRS-C/TCI \\
+\ideng{slb.session.pmsRootIndexU}{pmsRootIndexU} & $u\in[3,20]$ \\
+\ideng{slb.session.pmsResourceIndication}{pmsResourceIndication} & PMS 调度资源 \\
+\ideng{slb.session.sensingResourceIndication}{sensingResourceIndication} & 感知资源 \\
+\ideng{slb.session.txAntennaCount}{txAntennaCount} & $N_t$（安全感知） \\
+\end{longtable}
+
+\section{接入 / SAB / 同步能力}
+
+\begin{longtable}{L{7.5cm}L{7.7cm}}
+\caption{L1 接入与同步}\label{tab:l1-access} \\
+\toprule
+\textbf{id / 工程名} & \textbf{说明} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{id / 工程名} & \textbf{说明} \\
+\midrule
+\endhead
+\bottomrule\endfoot
+\ideng{slb.session.sabPeriod}{sabPeriod} & SAB 发送周期 \\
+\ideng{slb.session.broadcastPeriod}{broadcastPeriod} & 广播周期 \\
+\ideng{slb.session.contendCarrierBitmap}{contendCarrierBitmap} & 可并行竞争基础载波集合 \\
+\ideng{slb.session.connectedGNodeId}{connectedGNodeId} & T 所连 gNode（盲检匹配） \\
+\ideng{slb.session.syncCapabilityBits}{syncCapabilityBits} & 表13能力$\to$SyncID 高8 \\
+\ideng{slb.session.baseChannelCenterFreqHz}{baseChannelCenterFreqHz} & $f_0$（来自 8.3 配置落入会话） \\
+\end{longtable}
+
+%======================================================================
+\part{L2 模块专有可调}
+%======================================================================
+
+\section{6.2.2 帧结构模块 L2}
+
+\begin{longtable}{L{7.5cm}L{7.7cm}}
+\caption{L2：6.2.2}\label{tab:l2-622} \\
+\toprule
+\textbf{id / 工程名} & \textbf{说明} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{id / 工程名} & \textbf{说明} \\
+\midrule
+\endhead
+\bottomrule\endfoot
+\ideng{slb.frame.workingScgMaxIndex}{workingScgMaxIndex} & 由 nCh/lCh 派生，本模块算出后可导出 \\
+\ideng{slb.frame.baseScGroupIndex}{baseScGroupIndex} & 有效子载波$\to$组映射算法参数 \\
+\ideng{slb.frame.sharePortPolicy}{sharePortCommDomain} & 同端口校验策略开关 \\
+\ideng{slb.frame.commDomainScope}{commDomainScope} & 通信域资源集合边界标记 \\
+\end{longtable}
+
+\section{6.2.3 信号模块 L2}
+
+\begin{longtable}{L{7.5cm}L{7.7cm}}
+\caption{L2：6.2.3}\label{tab:l2-623} \\
+\toprule
+\textbf{id / 工程名} & \textbf{说明} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{id / 工程名} & \textbf{说明} \\
+\midrule
+\endhead
+\bottomrule\endfoot
+\ideng{slb.sig.ftsLutEnable}{ftsLutEnable} & FTS 整表查开关（实现策略） \\
+\ideng{slb.sig.stsLutEnable}{stsLutEnable} & STS 整表查 \\
+\ideng{slb.sig.pmsLutEnable}{pmsLutEnable} & PMS 整表查 \\
+\ideng{slb.sig.pasSubcarrierPair}{pasSubcarrierPair} & $(k_0,k_1)$ 若产品可配 \\
+\ideng{slb.sig.dmrsDCombCount}{dmrsDCombCount} & 常来自 L1；模块内校验默认1 \\
+\end{longtable}
+
+\section{6.2.7--10 接入/同步/波形 L2}
+
+\begin{longtable}{L{7.5cm}L{7.7cm}}
+\caption{L2：6.2.7--10}\label{tab:l2-62710} \\
+\toprule
+\textbf{id / 工程名} & \textbf{说明} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{id / 工程名} & \textbf{说明} \\
+\midrule
+\endhead
+\bottomrule\endfoot
+\ideng{slb.access.thSync}{thSync} & $Th_{\mathrm{sync}}$，协议未给数值，产品/实现定义 \\
+\ideng{slb.access.idleGranularity}{idleGranularity} & 默认=无线帧；可配置则 L2 \\
+\ideng{slb.access.timingAdjustStepTs}{timingAdjustStepTs} & 方式1步长（$\le4T_s$） \\
+\ideng{slb.access.freqOffsetAdjustStepPpm}{freqOffsetAdjustStepPpm} & 方式1频偏步长 \\
+\ideng{slb.access.syncAdjustModePolicy}{syncAdjustMode} & 微调 vs 跳变判决门限（实现） \\
+\ideng{slb.bb.mixerPhaseCalibEnable}{mixerClockPhaseAligned} & 多载波帧起点同相校准使能 \\
+\end{longtable}
+
+%======================================================================
+\part{L3 运行时交换}
+%======================================================================
+
+\section{时频索引与占用态}
+
+\begin{longtable}{L{6.5cm}L{3.6cm}L{5.1cm}}
+\caption{L3：索引与占用}\label{tab:l3-idx} \\
+\toprule
+\textbf{id / 工程名} & \textbf{生产者} & \textbf{消费者} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{id / 工程名} & \textbf{生产者} & \textbf{消费者} \\
+\midrule
+\endhead
+\bottomrule\endfoot
+\ideng{slb.rt.superframeNumber}{superframeNumber} & 6.2.2.2 无线帧和超帧 & 全 PHY \\
+\ideng{slb.rt.radioFrameIndex}{radioFrameIndex} & 定时 & 6.2.3 信号 / 6.5.3 / 6.2.7 \\
+\ideng{slb.rt.symbolIndex}{symbolIndex} & 定时 & 映射/基带 \\
+\ideng{slb.rt.subcarrierIndex}{subcarrierIndex} & 映射 & RE/信号 \\
+\ideng{slb.rt.antennaPortIndex}{antennaPortIndex} & 调度 & 网格 / 6.2.9 基带 \\
+\ideng{slb.rt.currentRadioFrameIndex}{currentRadioFrameIndex} & MAC/定时 & 6.2.2.3 COT / 6.2.7 \\
+\ideng{slb.rt.cotStartRadioFrameIndex}{cotStartRadioFrameIndex} & 6.2.7 3D-FISA / 6.2.2.3 & TTI/占用 \\
+\ideng{slb.rt.cotEndRadioFrameIndex}{cotEndRadioFrameIndex} & 6.2.7 3D-FISA / 6.2.2.3 & 6.2.8 多域同步 \\
+\ideng{slb.rt.ttiIndexInCot}{ttiIndexInCot} & 6.2.2.3 COT与TTI & 调度 \\
+\ideng{slb.rt.contendSuccess}{contendSuccess} & 6.2.7 3D-FISA & 6.2.9/10 门控 \\
+\ideng{slb.rt.occupiedBaseCarrierSet}{occupiedBaseCarrierSet} & 6.2.7 3D-FISA & 6.2.10 上变频 \\
+\end{longtable}
+
+\section{RE / 波形交换}
+
+\begin{longtable}{L{6.5cm}L{3.6cm}L{5.1cm}}
+\caption{L3：RE 与波形}\label{tab:l3-wave} \\
+\toprule
+\textbf{id / 工程名} & \textbf{生产者} & \textbf{消费者} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{id / 工程名} & \textbf{生产者} & \textbf{消费者} \\
+\midrule
+\endhead
+\bottomrule\endfoot
+\ideng{slb.rt.aKlComplex}{aKlComplex} & 6.2.3/4/5 信号/控制/数据 & 6.2.9 基带 \\
+\ideng{slb.rt.reIndexKl}{reIndexKl} & 映射方 & 6.2.2.6 资源网格 \\
+\ideng{slb.rt.rsQpskSequence}{rsQpskSequence} & 6.5.3 伪随机QPSK & 6.2.3.2--8 参考信号 \\
+\ideng{slb.rt.ftsMappedRe}{ftsMappedRe} & 6.2.3.1 FTS/STS & 6.2.7/8 盲检 \\
+\ideng{slb.rt.stsMappedRe}{stsMappedRe} & 6.2.3.1 FTS/STS & 盲检 \\
+\ideng{slb.rt.basebandSymbolSlp}{basebandSymbolSlp} & 6.2.9 基带信号生成 & 6.2.10 上变频 \\
+\ideng{slb.rt.rfSignalSrf}{rfSignalSrf} & 6.2.10 调制和上变频 & RF/第8章 \\
+\ideng{slb.rt.symbolStartTimeUs}{symbolStartTimeUs} & 6.2.9 基带信号生成 & 拼接/测试 \\
+\end{longtable}
+
+\section{3D-FISA / 多域同步事件量}
+
+\begin{longtable}{L{6.5cm}L{3.6cm}L{5.1cm}}
+\caption{L3：接入与同步事件}\label{tab:l3-fisa} \\
+\toprule
+\textbf{id / 工程名} & \textbf{生产者} & \textbf{消费者} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{id / 工程名} & \textbf{生产者} & \textbf{消费者} \\
+\midrule
+\endhead
+\bottomrule\endfoot
+\ideng{slb.rt.hasTrafficOrSignalingDemand}{hasTrafficOrSignalingDemand} & 高层 & 6.2.7 3D-FISA \\
+\ideng{slb.rt.tBlindDetectResult}{tBlindDetectResult} & 6.2.7 3D-FISA(T) & MAC \\
+\ideng{slb.rt.matchedBaseCarrierIndex}{matchedBaseCarrierIndex} & 6.2.7 3D-FISA & 跟随调度 \\
+\ideng{slb.rt.syncId}{syncId} & 6.2.8 多域同步 & SAB/选源 \\
+\ideng{slb.rt.syncSourceGNodeId}{syncSourceGNodeId} & 6.2.8 多域同步 & 本域调整 \\
+\ideng{slb.rt.neighborFtsStrength}{neighborFtsStrength} & 接收机 & 6.2.8 多域同步 \\
+\ideng{slb.rt.neighborSyncIdSet}{neighborSyncIdSet} & 6.2.8 多域同步 & 选源 \\
+\ideng{slb.rt.xrcReconfigTimingJump}{xrcReconfigTimingJump} & 6.2.4 控制信息/上层 & 6.2.8 方式2 \\
+\end{longtable}
+
+\section{边界模块输出（本册只登记引用名）}
+
+以下参数由他章生产，6.2 只消费其输出（嵌套规则）：
+
+\begin{longtable}{L{4.5cm}L{4.5cm}L{6.2cm}}
+\caption{跨章边界输出（引用）}\label{tab:l3-boundary} \\
+\toprule
+\textbf{来源模块} & \textbf{输出工程名} & \textbf{本册消费者} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{来源模块} & \textbf{输出工程名} & \textbf{本册消费者} \\
+\midrule
+\endhead
+\bottomrule\endfoot
+6.5.3 伪随机QPSK & \eng{rsQpskSequence} & 6.2.3.2--8 参考信号、安全 PMS \\
+6.5.4 功率控制 & 功率已写入 $a_{k,l}$ 幅度 & 6.2.9 基带（不再重算） \\
+6.2.4 物理层控制信息 & \eng{sabRabSymbolLayout},\eng{hasSabInCarrier},\eng{syncIdFieldInSab},\ldots & 6.2.3/7/8 \\
+6.2.5 物理层数据 & \eng{dataFrameFirstSymbolIndex} & 6.2.3.8 PAS \\
+8.3 信道中心频率 & \eng{baseChannelCenterFreqHz} & 6.2.2.4/7/9/10 \\
+\end{longtable}
+
+\newpage
+\section{统计与交付检查}
+
+\begin{itemize}[nosep]
+  \item L0：时频 / 符号表 / 网格载波 / 同步常量 — 默认 \texttt{frozen}；
+  \item L1：帧带宽、RS 配置 IE、SAB/能力/$f_0$ — \texttt{draft}，需与 SessionConfig 对齐；
+  \item L2：查表策略、Th\_sync、微调步长、同相校准 — \texttt{draft}；
+  \item L3：索引、RE/波形、竞争/盲检/SyncID 事件 — 偏接口暴露，\texttt{draft}。
+\end{itemize}
+
+\textbf{naming 自检}：airMode=slb；工程名 lowerCamelCase + 单位后缀；无 \texttt{Sle*}；无模糊名 \texttt{data/info/tmp}。
+
+\end{document}

@@ -1,0 +1,54 @@
+# 6.6.1 一般概述（角色 / XRC / 汇聚）— 模块实现参数清单
+# airMode=slb；命名 nearlink-naming
+# 规则：本模块参数列全；依赖他模块时只写其输出，不展开其入参。
+# 建议包：P0 公共类型 / P1 配置应用（nearlink/slb/pos/）
+
+────────────────────────────────────────
+6.6.1 角色、能力、XRC 配置与测量汇聚
+建议 API:
+  slbPosCreateContext / slbPosDestroyContext
+  slbPosApplyXrcConfig / slbPosApplyGciResource / slbPosValidateConfig
+  slbPosAggregateMeasIe / slbPosForwardToFixNode（汇聚侧）
+────────────────────────────────────────
+
+【本模块输出】
+  SlbPosContext              定位上下文（会话真源）
+    localPhyId               本节点 PhyID
+    ofdmPositioningCapable   OFDM 定位能力位
+    nodeCount / nodes[]      SlbPosNodeConfig 表
+      phyId, role(ANCHOR|TAG|FIX_NODE),
+      anchorXyzM[3], hasAnchorCoord
+    frameType                ABS | REL（位置信息类型）
+    fixNodePhyId             解算节点 PhyID
+    optionalMeasBitmap       TOD/TOA/AoA/AoD/CSI 可选测量项开关
+    staticPmsConfig          静态：载波/带宽/序列等（XRC 已解析子集）
+    reportTarget             上报目标（G / 解算节点 / 标签）
+    groupcastAddress         组播地址（FLAG 用）
+  configValid                校验通过标志；失败码 ERR_CAP/ERR_PARAM
+  aggregatedMeasSet[]        汇聚后的测量 IE 集合（待交 6.6.4 / MAC）
+  syncReadyFlag              组内同步完成条件标签（来自 SAB 回调后写入）
+
+【本模块输入 — 直接】
+  L1（第7章已解析，禁止 raw ASN.1）:
+    xrcParsedFields          角色表、静态资源、组播、测量项、上报目标、锚点坐标
+    capabilityIe             aoA-Estimation / aoD-Estimation / OFDM定位 / FLAG / 跳频
+  L3/事件:
+    gciFormat0to2Decoded     当次无线帧/符号/端口/波束（动态资源）
+    sabSyncDone              SAB/FTS 同步完成指示（回调）
+    measReportIeFromPeers[]  锚点/标签上报的测量 IE（汇聚用）
+
+【本模块输入 — 他模块输出（嵌套引用，不展开）】
+  引用 → 第7章 输出: 已解析 XRC/能力/测量组 PDU 字段子集
+  引用 → 6.2.4.6.6 输出: GCI 格式0--2 解码结果（资源指示）
+  引用 → 6.2.3/SAB 输出: 同步完成指示
+  （本模块不调用 6.2.3.9 生成 PMS；由测距/测角子模块触发）
+
+【关键约束】
+  G 测量前必须配置三类角色；G/T 可兼任
+  frameType 与 6.6.4 输出坐标系必须一致
+  ofdmPositioningCapable=false → RTT 拒配（ERR_CAP）
+  FLAG/跳频按能力位可选启用
+  锚点偏 TTI 动态指示；标签偏超帧静态（配置模式差异）
+
+【不负责】
+  ASN.1 组包；射频/DMA；几何闭合公式

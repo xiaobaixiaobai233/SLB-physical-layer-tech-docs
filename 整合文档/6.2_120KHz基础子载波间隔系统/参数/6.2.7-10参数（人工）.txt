@@ -1,0 +1,114 @@
+# 6.2.7–6.2.10 3D-FISA / 多域同步 / 基带 / 上变频 — 模块实现参数清单（补全）
+# airMode=slb；命名遵循 nearlink-naming
+# 规则：实现本模块所需参数全部列出；若依赖他模块算出的量，只写「他模块输出」，不展开他模块入参。
+
+────────────────────────────────────────
+6.2.7 3D-FISA 流程
+建议 API: slbSelectSabPeriod / slbSelectContendCarrierBitmap / slbSelectIdleGranularity
+          / slbContendBaseCarrier / slbFollowGNodeSchedule（T 盲检跟随）
+────────────────────────────────────────
+【本模块输出】
+  contendSuccess             本帧×基础载波竞争成败
+  occupiedBaseCarrierSet[]   已占用基础载波集合
+  cotStartRadioFrameIndex    占用起（竞争成功后首无线帧）
+  cotEndRadioFrameIndex      占用止（释放前末无线帧）
+  sabTxPeriod                SAB 发送周期（占用粒度）
+  broadcastTxPeriod          广播发送周期
+  idleGranularity            空闲粒度 = 1 无线帧
+  contendTimeGranularity     竞争时域粒度 = 1 无线帧
+  contendFreqGranularity     竞争频域粒度 = 1 基础载波
+  tBlindDetectResult         T 盲检成败
+  tFollowWindowSabPeriod     成功后跟随窗口 = 1 个 SAB 发送周期
+  matchedBaseCarrierIndex    成功盲检所在基础载波
+  connectedGNodeId           所连 gNode 标识（盲检匹配用）
+
+【本模块直接入参】
+  L1: sabPeriod, broadcastPeriod, contendCarrierBitmap（可并行竞争基础载波集合）
+  L1: workingBandwidth / transmissionMode / linkLayout（帧结构·工作带宽·连续/非连续·G/T/A 布局，会话侧）
+  高层触发: hasTrafficOrSignalingDemand（本帧是否有业务/信令需求）
+  运行时: currentRadioFrameIndex（当前帧位置）
+  引用 → 6.2.2.2 输出: radioFramesPerSuperframe, superframeNumber（帧边界）
+  引用 → 6.2.2.3 输出: cotStartRadioFrameIndex/cotEndRadioFrameIndex 契约, nTti, transmissionMode
+  引用 → 6.2.2.4 输出: nCh, baseChannelBwMHz, subcarrierCount（基础载波与 RE 规模）
+  引用 → 6.2.2.7 输出: reIndexKl（占用期内真正发符号时的 RE 坐标，仅引用网格）
+  引用 → 6.2.2.1 输出: generalSymbLenTs / boundarySymbLenTs（占用期内真正发符号时长）
+  引用 → 8.3 输出: baseChannelCenterFreqHz（基础载波中心频）
+  引用 → 6.2.4 输出: sabPeriodField / broadcastPeriodField / gNodeIdInSab（SAB 字段，仅引用）
+  引用 → 6.2.3.1 输出: ftsMappedRe / stsMappedRe（T 盲检相关峰对象，不展开 FTS 入参）
+
+【行为约束（非数值入参，实现必守）】
+  无传输需求 → 空闲，禁止发任何 PHY 信号
+  竞争成功 → 至少 1 个基础载波上自首帧起按周期发 SAB/广播直至释放
+  T 成功 → 在 matchedBaseCarrier 上跟 1 个 SAB 周期，下周期再检
+  T 失败 → 下一无线帧再检
+
+────────────────────────────────────────
+6.2.8 多域同步流程
+建议 API: slbBuildSyncId / slbSelectSyncSource / slbApplyIntraDomainAdjust / slbTrackInterDomain
+────────────────────────────────────────
+【本模块输出】
+  syncId                     32 bit SyncID（高8 能力 + 低24 随机）
+  syncCapabilityBits         SyncID[31:24] 多域同步能力属性（标准表13）
+  syncSourceGNodeId          同步源 G（max SyncID，且 FTS 强度 > Th_sync）
+  syncAdjustMode             方式1微调 / 方式2统一跳变
+  timingAdjustStepTs         方式1定时步长（典型 ≤4 Ts）
+  freqOffsetAdjustStepPpm    方式1频偏步长（典型 ≤0.1 ppm）
+  interDomainTrackPeriodUs   空闲跟踪周期 = 250 μs
+  postCotTrackWindowCount    COT 结束后连续 4×250 μs 窗口
+
+【本模块直接入参】
+  L2/产品: thSync（门限 Th_sync，协议未给数值，实现定义）
+  L1/能力: txPowerCapabilityBit, multiDomainSyncVersion, powerSupplyType,
+           timingSourceCode, devicePriorityBit（表13 → 高8位）
+  运行时: neighborFtsStrength, neighborSyncIdSet[]
+  方式2: xrcReconfigTimingJump / sibTimingJump（大偏差统一时刻）
+  引用 → 6.2.4 输出: syncIdFieldInSab / multiDomainCapabilityIe（SyncID 承载与能力 IE）
+  引用 → 6.2.3.1 输出: ftsMappedRe（邻域捕获对象；强度与相关峰由接收机给出）
+  引用 → 6.2.2.1 输出: tsSec（方式1步长相对 Ts）
+  引用 → 6.2.7 输出: cotEndRadioFrameIndex, idleGranularity（跟踪触发时刻）
+
+【比较规则】
+  仅 FTS 强度 > thSync 的邻域参与；32 bit 无符号比较取 max(SyncID)
+
+────────────────────────────────────────
+6.2.9 基带信号生成
+建议 API: slbGenerateOfdmBasebandSymbol
+────────────────────────────────────────
+【本模块输出】
+  basebandSymbolSlp[]        复基带连续/采样信号 s_l^{(p)}(t)
+  symbolStartTimeUs          t_start,l（前序符号时长与 GAP 累加）
+  ifftSize                   工程常用 256 点 IFFT（k=161..255 置零）
+
+【本模块直接入参】
+  运行时: symbolIndex l, antennaPortIndex p
+  引用 → 6.2.2.7 输出: aKlComplex（整符号 k=0..160 的 RE 值；空闲/DC 已为 0）
+  引用 → 6.2.2.1 输出: deltaFHz, ofdmUsefulLenTs,
+                        generalCpLenTs / boundarySymbLenTs / gap1LenTs（→ T_CP, T_Symb）
+  引用 → 6.2.2.2 输出: nSymFrame, boundaryCpSymbolIndices[]（本符号一般/边界判定）
+  引用 → 6.2.3.1 输出: ftsMappedRe 特例标志（FTS 首符号 2×CP、次符号无 CP）
+  引用 → 6.5.4 输出: 功率已体现在 a_{k,l} 幅度（本公式不再重算功率）
+
+【公式依赖（均通过上列引用获得，不在本模块重定义）】
+  s_l^{(p)}(t) = Σ_k a_{k,l}^{(p)} · exp(j2π(k-80)Δf (t - T_CP - t_start,l))
+  定义域: t_start,l ≤ t < t_start,l + T_Symb；无线帧起点 t=0
+
+【触发】
+  引用 → 6.2.7 输出: contendSuccess/占用态（空闲禁发，不得进入 6.2.9）
+
+────────────────────────────────────────
+6.2.10 调制和上变频
+建议 API: slbUpconvertIqToRf
+────────────────────────────────────────
+【本模块输出】
+  rfSignalSrf[]              射频实信号 s_RF^{(p)}(t) = Re{ s · e^{j2π f0 t} }
+  mixerClockPhaseAligned     多基础载波在无线帧起点混频时钟同相（约束满足标志）
+
+【本模块直接入参】
+  运行时: antennaPortIndex p
+  引用 → 6.2.9 输出: basebandSymbolSlp[]（I/Q Split 输入）
+  引用 → 8.3 输出: baseChannelCenterFreqHz（f0）
+  引用 → 6.2.2.2 输出: 无线帧起点 t=0（多载波相位复位时刻）
+  引用 → 6.2.7 输出: occupiedBaseCarrierSet[]（哪些载波需同相校准）
+
+【处理链】
+  Split → I·cos(2πf0t), Q·(-sin(2πf0t)) → 求和 Filtering → RF

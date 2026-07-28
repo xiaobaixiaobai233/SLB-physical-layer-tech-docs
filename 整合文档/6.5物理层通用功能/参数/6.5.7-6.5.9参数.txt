@@ -1,0 +1,98 @@
+# 6.5.7–6.5.9 比特加扰 / SC-FDMA / ZC — 模块实现参数清单（补全）
+# airMode=slb；命名遵循 nearlink-naming
+# 规则：实现本模块所需参数全部列出；若依赖他模块算出的量，只写「他模块输出」，不展开他模块入参。
+
+────────────────────────────────────────
+6.5.7 比特加扰
+建议 API: slbCalculateScrambleCinit / slbScrambleBits
+────────────────────────────────────────
+【本模块输出】
+  scrambleCinit              按业务选定的 c_init
+  scrambledBits[]            t̃_i = (t_i + c(i)) mod 2
+
+【本模块直接入参】
+  L3: codedBits[] t_i、bitCount N_bit
+  L1/业务: scrambleServiceKind（一类/二类数据、广播、控制、深覆盖…）
+  数据默认: radioFrameStartLow7 n_f（起始无线帧号 mod 128）、gPid N_G-PID
+    → c_init = n_f·2^24 + N_G-PID
+  广播: nIdTs → c_init = N_ID^TS
+  控制(G/T 深覆盖路径): c_init = 510（固定）
+  深覆盖 PHY 数据: 高层配置 c_init
+  引用 → 6.5.2 输出: goldBits[]（长度 ≥ N_bit；不展开 Gold）
+  引用 → 6.2.5/6.2.6 输出: 编码/速率匹配比特（仅引用比特流）
+
+【强制隔离】
+  本场景 c_init 不得与 6.5.3 RS、6.5.9.1 组跳共用流/偏移
+  每 TB 按起始帧重算；无跨 TB 加扰状态
+
+【金标】
+  N_G-PID=42，帧号 127 → c_init = 2130700346
+
+【下游】
+  引用方 → 6.5.6 消费 scrambledBits[]
+
+────────────────────────────────────────
+6.5.8 SC-FDMA 波形（DFT 预编码）
+建议 API: slbGenerateScFdmaPrecoded
+────────────────────────────────────────
+【本模块输出】
+  scFdmaSymbols[]            y(lM+k)，段内 M 点 DFT 且 ×1/√M
+  dftSizeM                   M = M_SC^Total
+  symbolSegmentCountL        L = M_symb / M
+
+【本模块直接入参】
+  L1/带宽: scgSizeMscg1、scgCountNscg1（或直接 M_SC^Total）
+    M_SC^Total = M_SCG,1 · N_SCG,1；M_SCG,1 = 2^{α2}3^{α3}5^{α5}
+  L3: modulatedSymbols[] x[]（长度 M_symb）
+  约束: M_symb 必须被 M 整除；段间不交叉
+  引用 → 6.5.6 输出: modulatedSymbols[]（不展开调制）
+  适用: 主要 6.3.3 深覆盖路径（常规 6.2.5 数据通常不走本节）
+
+【本模块不负责】
+  IFFT/CP（交给 6.2.9）；RE 映射（6.2.3）
+
+────────────────────────────────────────
+6.5.9 Zadoff-Chu 参考序列
+建议 API: slbGenerateZcSequence
+────────────────────────────────────────
+【本模块输出】
+  zcBaseSequence[]           r_{u,v}(n)，0≤n<M_SC^RS
+  zcCyclicShifted[]          r_{u,v}^{(α)}(n) = e^{jαn} · r_{u,v}(n)
+
+【本模块直接入参】
+  L1/调度: groupIndexU u∈{0..29}、baseSeqIndexV v、cyclicShiftAlpha α、
+           lengthFactorM m、rsSubcarrierCount M_SC^RS
+  分支:
+    m=2 → 必须查标准相位表 φ(n)∈{1,-1,3,-3}；禁止 ZC 闭式
+    其他 m → 按标准取 N_ZC^RS 与 q 闭式（与正式标准一致）
+  v 约束: 1≤m≤5 仅 v=0；更大 m 时 v∈{0,1}
+  可选: 引用 → 6.5.9.1 输出: groupIndexU（组跳算出的 u，不展开组跳入参）
+
+【下游】
+  OCC × β_RS 与 RE 映射由 6.3.3/6.2.3 消费本输出（本模块不展开）
+
+────────────────────────────────────────
+6.5.9.1 序列组跳
+建议 API: slbCalculateZcGroupHop
+────────────────────────────────────────
+【本模块输出】
+  groupHopCinit              c_init = floor(n_ID^X / 30)
+  groupHopFgh                f_gh(n_S) = (Σ_{i=0..7} c(8n_S+i)·2^i) mod 30
+  groupHopFss                f_SS = floor(n_ID^X / 16) mod 30
+  groupIndexU                u = (f_gh + f_SS) mod 30
+
+【本模块直接入参】
+  L1: nIdX（业务/小区相关 ID）
+  L3: slotIndexNs n_S
+  引用 → 6.5.2 输出: goldBits[]（用 groupHopCinit 生成；长度需覆盖 8n_S+7）
+
+【约束】
+  同槽 n_S 内 u 不变；换槽先组跳再调 6.5.9
+  c_init 与 6.5.3/6.5.7 隔离
+
+────────────────────────────────────────
+【三类 Gold c_init 场景一览（嵌套引用）】
+  6.5.3 RS QPSK  → 本文件不展开；见 6.5.3 输出 rsCinit
+  6.5.7 加扰     → scrambleCinit
+  6.5.9.1 组跳   → groupHopCinit
+  三者禁止混流

@@ -1,0 +1,269 @@
+% !TEX program = xelatex
+\documentclass[10pt,a4paper]{ctexart}
+
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{enumitem}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{xurl}
+\usepackage{hyperref}
+
+\geometry{left=1.8cm,right=1.8cm,top=2.2cm,bottom=2.2cm}
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue}
+
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newcolumntype{C}[1]{>{\centering\arraybackslash}p{#1}}
+\urlstyle{tt}
+\newcommand{\eng}[1]{\begingroup\footnotesize\path{#1}\endgroup}
+\newcommand{\tid}[1]{\begingroup\footnotesize\path{#1}\endgroup}
+\newcommand{\ideng}[2]{\tid{#1}\newline\eng{#2}}
+
+\title{%
+  \textbf{星闪 SLB 物理层}\\[0.3em]
+  \Large 6.5 相关参数四层整合登记（L0--L3）\\[0.2em]
+  \large 物理层通用功能 \textbullet\ Phase A
+}
+\author{从来源：6.5.1--6.5.9 模块参数清单整合去重\\
+airMode\,=\,\texttt{slb}（nearlink-naming + slb-param-registry）\\
+\small 状态：L0 算法常量多标 \texttt{frozen}；其余默认 \texttt{draft}
+}
+\date{2026 年 7 月 28 日}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+\section{四层约定}
+
+\begin{longtable}{C{1.2cm}L{3.2cm}L{5.5cm}L{5cm}}
+\caption{L0--L3}\label{tab:layers} \\
+\toprule
+\textbf{层} & \textbf{含义} & \textbf{写} & \textbf{读} \\
+\midrule
+L0 & 系统/算法常量 & 无 & 全 PHY \\
+L1 & 会话/上层下发 & MAC/配置 & PHY 只读 \\
+L2 & 模块专有可调 & 本模块 & 本模块+边界 \\
+L3 & 运行时交换 & 生产者 & 消费者 \\
+\bottomrule
+\end{longtable}
+
+%======================================================================
+\part{L0}
+%======================================================================
+
+\section{CRC / Gold / RS QPSK 常量}
+
+\begin{longtable}{L{7.5cm}L{7.7cm}}
+\caption{L0：6.5.1--3}\label{tab:l0-6513} \\
+\toprule
+\textbf{id / 工程名} & \textbf{说明} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{id / 工程名} & \textbf{说明} \\
+\midrule
+\endhead
+\bottomrule\endfoot
+\ideng{slb.phy.crcPolyTable}{crcPoly} & 五种 $g(D)$：$L\in\{6,8,16,24\}$ \\
+\ideng{slb.phy.goldOffset1600}{goldOffset1600} & 强制 1600；禁止省略 \\
+\ideng{slb.phy.x1InitFixed}{x1InitFixed} & $x_1(0){=}1$，其余 30 位 0 \\
+\ideng{slb.phy.rsQpskSubcarrierCount}{rsQpskSubcarrierCount} & 161 \\
+\ideng{slb.phy.rsGoldLengthMpn}{rsGoldLengthMpn} & 322 \\
+\ideng{slb.phy.rsQpskScale}{rsQpskScale} & $1/\sqrt{2}$（无整体负号） \\
+\end{longtable}
+
+\section{调制归一化}
+
+\begin{longtable}{L{7.5cm}L{7.7cm}}
+\caption{L0：6.5.6 归一化}\label{tab:l0-656} \\
+\toprule
+\textbf{id / 工程名} & \textbf{取值} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{id / 工程名} & \textbf{取值} \\
+\midrule
+\endhead
+\bottomrule\endfoot
+\ideng{slb.phy.modNormQpsk}{modNormQpsk} & $1/\sqrt{2}$（公式含整体负号） \\
+\ideng{slb.phy.modNorm16Qam}{modNorm16Qam} & $1/\sqrt{10}$ \\
+\ideng{slb.phy.modNorm64Qam}{modNorm64Qam} & $1/\sqrt{42}$ \\
+\ideng{slb.phy.modNorm256Qam}{modNorm256Qam} & $1/\sqrt{170}$ \\
+\ideng{slb.phy.modNorm1024Qam}{modNorm1024Qam} & $1/\sqrt{682}$ \\
+\ideng{slb.phy.modNorm4096Qam}{modNorm4096Qam} & $1/\sqrt{2730}$ \\
+\end{longtable}
+
+\section{测量门限 / 坐标系}
+
+\begin{longtable}{L{7.5cm}L{7.7cm}}
+\caption{L0：测量相关}\label{tab:l0-meas} \\
+\toprule
+\textbf{id / 工程名} & \textbf{说明} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{id / 工程名} & \textbf{说明} \\
+\midrule
+\endhead
+\bottomrule\endfoot
+\ideng{slb.phy.cbraDtPreambleThreshDbm}{cbraDtPreambleThreshDbm} & $-87$\,dBm \\
+\ideng{slb.phy.cbraNoDtThreshDbm}{cbraNoDtThreshDbm} & $-62$\,dBm \\
+\tid{slb.phy.aoaCoordConvention} & $Z$ 法线、$X$ 正南、$Y$ 正东 \\
+\end{longtable}
+
+%======================================================================
+\part{L1}
+%======================================================================
+
+\section{功控 / 参考功率}
+
+\begin{longtable}{L{7.5cm}L{7.7cm}}
+\caption{L1：功控}\label{tab:l1-pwr} \\
+\toprule
+\textbf{id / 工程名} & \textbf{说明} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{id / 工程名} & \textbf{说明} \\
+\midrule
+\endhead
+\bottomrule\endfoot
+\ideng{slb.session.gLinkReferenceSignalPowerDbm}{gLinkReferenceSignalPowerDbm} & G 链路参考功率 \\
+\ideng{slb.session.srsP0NominalDbm}{srsP0NominalDbm} & srs-P0-NominalConfig \\
+\ideng{slb.session.rachP0NominalDbm}{rachP0NominalDbm} & rach-P0-NominalConfig \\
+\ideng{slb.session.ackP0NominalDbm}{ackP0NominalDbm} & ack-P0-NominalConfig \\
+\ideng{slb.session.dataClass1P0NominalDbm}{dataClass1P0NominalDbm} & data-Class1-P0 \\
+\ideng{slb.session.dataClass2P0NominalDbm}{dataClass2P0NominalDbm} & data-Class2-P0 \\
+\ideng{slb.session.pMaxDbm}{pMaxDbm} & $P_{\mathrm{MAX}}$ \\
+\ideng{slb.session.gNodeIdLow8}{gNodeIdLow8} & $N_{\mathrm{ID}}$（6.5.3） \\
+\end{longtable}
+
+\section{调制 / 加扰 / ZC 会话项}
+
+\begin{longtable}{L{7.5cm}L{7.7cm}}
+\caption{L1：调制加扰 ZC}\label{tab:l1-mod} \\
+\toprule
+\textbf{id / 工程名} & \textbf{说明} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{id / 工程名} & \textbf{说明} \\
+\midrule
+\endhead
+\bottomrule\endfoot
+\ideng{slb.session.modType}{modType} & 或由 \eng{mcsIndex} 映射；PHY 禁止自改 \\
+\ideng{slb.session.gPid}{gPid} & $N_{\mathrm{G-PID}}$（数据加扰） \\
+\ideng{slb.session.scFdmaTotalScCount}{scFdmaTotalScCount} & $M_{\mathrm{SC}}^{\mathrm{Total}}$ \\
+\ideng{slb.session.zcGroupIndexU}{groupIndexU} & 或由组跳派生 \\
+\ideng{slb.session.zcNidX}{nIdX} & 组跳 $n_{\mathrm{ID}}^X$ \\
+\ideng{slb.session.pmsCsiReportMode}{pmsCsiReportMode} & 模式 1/2 \\
+\end{longtable}
+
+%======================================================================
+\part{L2}
+%======================================================================
+
+\begin{longtable}{L{7.5cm}L{7.7cm}}
+\caption{L2：模块可调}\label{tab:l2} \\
+\toprule
+\textbf{id / 工程名} & \textbf{说明} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{id / 工程名} & \textbf{说明} \\
+\midrule
+\endhead
+\bottomrule\endfoot
+\ideng{slb.common.x1LutEnable}{x1LutEnable} & Gold $x_1$ 预计算开关 \\
+\ideng{slb.common.modLutEnable}{modLutEnable} & 调制 LUT 查表开关 \\
+\ideng{slb.meas.cbraWindowPolicy}{cbraMeasureWindow} & CBRA 窗选择策略 \\
+\ideng{slb.meas.sinrFloorPolicy}{sinrFloorPolicy} & 分母$\le0$ 时钳位/报错策略 \\
+\ideng{slb.zc.m2TableOnly}{zcM2TableOnly} & $m{=}2$ 强制查表（不可关） \\
+\end{longtable}
+
+%======================================================================
+\part{L3}
+%======================================================================
+
+\section{序列 / 校验 / 调制交换}
+
+\begin{longtable}{L{6.5cm}L{3.6cm}L{5.1cm}}
+\caption{L3：共性算法交换}\label{tab:l3-common} \\
+\toprule
+\textbf{id / 工程名} & \textbf{生产者} & \textbf{消费者} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{id / 工程名} & \textbf{生产者} & \textbf{消费者} \\
+\midrule
+\endhead
+\bottomrule\endfoot
+\ideng{slb.rt.crcEncodedBits}{crcEncodedBits} & 6.5.1 CRC & 6.2.6 信道编码 \\
+\ideng{slb.rt.crcPass}{crcPass} & 6.5.1 CRC & MAC/HARQ \\
+\ideng{slb.rt.cInit}{cInit} & 各业务公式 & 6.5.2 Gold序列 \\
+\ideng{slb.rt.goldBits}{goldBits} & 6.5.2 Gold序列 & 6.5.3/7/9.1 \\
+\ideng{slb.rt.rsQpskSequence}{rsQpskSequence} & 6.5.3 伪随机QPSK & 6.2.3 物理层信号 \\
+\ideng{slb.rt.scrambledBits}{scrambledBits} & 6.5.7 比特加扰 & 6.5.6 调制 \\
+\ideng{slb.rt.modulatedSymbols}{modulatedSymbols} & 6.5.6 调制 & 6.2.3 信号 / 6.5.8 \\
+\ideng{slb.rt.scFdmaSymbols}{scFdmaSymbols} & 6.5.8 SC-FDMA & 映射 \\
+\ideng{slb.rt.zcCyclicShifted}{zcCyclicShifted} & 6.5.9 ZC序列 & 6.3.3 DMRS \\
+\end{longtable}
+
+\section{功控 / 测量交换}
+
+\begin{longtable}{L{6.5cm}L{3.6cm}L{5.1cm}}
+\caption{L3：功控测量}\label{tab:l3-pwr} \\
+\toprule
+\textbf{id / 工程名} & \textbf{生产者} & \textbf{消费者} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{id / 工程名} & \textbf{生产者} & \textbf{消费者} \\
+\midrule
+\endhead
+\bottomrule\endfoot
+\ideng{slb.rt.rsrpDbm}{rsrpDbm} & 6.5.5.1 RSRP & 6.5.4 功控/$P_L$ \\
+\ideng{slb.rt.rssiDbm}{rssiDbm} & 6.5.5.2 RSSI & RSRQ/SINR \\
+\ideng{slb.rt.pathlossDb}{pathlossDb} & 6.5.4 功率控制 & 单业务 $P$ \\
+\ideng{slb.rt.txPowerTotalDbm}{txPowerTotalDbm} & 6.5.4 功率控制 & 发射缩放 \\
+\ideng{slb.rt.txPowerPerScLin}{txPowerPerScLin} & 6.5.4 功率控制 & $a_{k,l}$ 幅度 \\
+\ideng{slb.rt.cbra}{cbra} & 6.5.5.5 CBRA & LBT/竞争 \\
+\ideng{slb.rt.pmsIqLinear}{pmsIqLinear} & 6.5.5.6 PMS-CSI & 6.6 位置测量 \\
+\ideng{slb.rt.pmsTimeDiffT}{pmsTimeDiffT} & 6.5.5.7 PMS时间差 & 6.6 位置测量 \\
+\ideng{slb.rt.aoaAzimuthDeg}{aoaAzimuthDeg} & 6.5.5.8 AoA角度 & 6.6 位置测量 \\
+\end{longtable}
+
+\section{边界引用（他章输出，本册不展开）}
+
+\begin{longtable}{L{4.5cm}L{4.5cm}L{6.2cm}}
+\caption{跨章边界}\label{tab:l3-b} \\
+\toprule
+\textbf{来源} & \textbf{输出} & \textbf{本册消费者} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{来源} & \textbf{输出} & \textbf{本册消费者} \\
+\midrule
+\endhead
+\bottomrule\endfoot
+6.2.2.1 波形和符号 & \eng{nCp} & 6.5.3 伪随机QPSK \\
+6.2.2.2 无线帧和超帧 & \eng{nSymFrame} & 6.5.3 $l$ 校验 \\
+6.2.3.1 FTS/STS & 训练 RE 位置 & 6.5.5.1 RSRP \\
+6.2.3.9 PMS波形 & PMS 资源 & 6.5.5.6 PMS-CSI \\
+6.2.4/5/6 控制/数据/编码 & 比特流 & 6.5.1 CRC / 6.5.7 加扰 \\
+6.6 位置测量流程 & --- & 消费 PMS 三类量 \\
+\end{longtable}
+
+\section{交付检查}
+\begin{itemize}[nosep]
+  \item 三场景 $c_{\mathrm{init}}$（6.5.3 / 6.5.7 / 6.5.9.1）隔离已登记；
+  \item 6.5.3 与 6.5.6.1 QPSK 符号约定分离；
+  \item L1 $P_o$/$P_{\mathrm{MAX}}$/MCS 仅上层写；
+  \item naming：airMode=slb；有量纲带单位后缀。
+\end{itemize}
+
+\end{document}

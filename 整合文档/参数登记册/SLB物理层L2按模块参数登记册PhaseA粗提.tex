@@ -1,0 +1,592 @@
+% !TEX program = xelatex
+\documentclass[11pt,a4paper]{ctexart}
+
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{xurl}
+\usepackage{hyperref}
+
+\geometry{left=2.0cm,right=2.0cm,top=2.3cm,bottom=2.3cm}
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue}
+
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newcolumntype{C}[1]{>{\centering\arraybackslash}p{#1}}
+% 等宽名可在列宽内断行（解决 \texttt{长驼峰} 溢出叠字）
+\urlstyle{tt}
+\newcommand{\api}[1]{\begingroup\footnotesize\path{#1}\endgroup}
+\newcommand{\modid}[1]{\begingroup\footnotesize\bfseries\path{#1}\endgroup}
+\newcommand{\regid}[1]{\begingroup\footnotesize\path{#1}\endgroup}
+% 细模块行：id 与 API 上下叠排，避免四列挤爆
+\newcommand{\modcell}[2]{\modid{#1}\newline\api{#2}}
+\newcommand{\modcellTwo}[3]{\modid{#1}\newline\api{#2}\newline\api{#3}}
+\newcommand{\secrow}[1]{\multicolumn{3}{l}{\textit{#1}} \\}
+
+\title{%
+  \textbf{星闪 SLB 物理层}\\[0.35em]
+  \Large L2 按模块参数登记册（Phase A 粗提）\\[0.25em]
+  \large 函数级细模块 \textbullet\ 建议 API \textbullet\ nearlink-naming
+}
+\author{切分原则：\textbf{按可独立实现的函数/库单元}，不以章节 \texttt{.tex} 粗切\\
+airMode\,=\,\texttt{slb}；流程见 skill \texttt{slb-param-registry} + \texttt{nearlink-naming}\\[0.2em]
+\small 精确数值以 T/XS 10001-2025 与各分册为准；协议节号仅作溯源锚点
+}
+\date{2026 年 7 月 28 日}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+%======================================================================
+\part{总览}
+%======================================================================
+
+\section{本册范围}
+
+本册做 Skill 中的\textbf{按细模块 L2 Phase A 粗提}：每个细模块对应\textbf{一个（或一组紧密耦合的）建议 API}，带本函数入参/局部可配量。
+
+\begin{itemize}[nosep]
+  \item \textbf{不是} L0 / L1（见对应登记册与 SessionConfig）；
+  \item \textbf{不是}「一章一个模块」：协议节号只作溯源，\textbf{切分依据是函数边界}；
+  \item 偏 L3 的当次调用量标「偏 L3」，先占位命名；跨章 L3 见 \texttt{SLB物理层L3跨模块交换登记册}；
+  \item 溯源节号宜写「节号+中文短名」；他模块依赖只引输出（见 skill 嵌套规则）。
+\end{itemize}
+
+\textbf{状态}：默认 \texttt{draft}。\\
+\textbf{命名}：类型 \texttt{Slb*}；函数 \texttt{slb}+动词（\texttt{select}/\texttt{calculate}/\texttt{generate}/\texttt{map}/\texttt{validate}/\texttt{estimate}/\ldots）；有量纲带单位后缀。
+
+\section{切分原则}
+
+\begin{enumerate}[nosep]
+  \item \textbf{一函数一细模块}：可单独编译/单测/被 vibecode 替换的入口；
+  \item \textbf{建议 API 列必填}：工程落地时以函数名为准，不以 \texttt{M622} 这类章节代号为准；
+  \item \textbf{参数跟函数走}：该函数读的 L0/L1、本函数 L2、调用时 L3 写在该细模块下；
+  \item \textbf{旧代号废弃}：原 \texttt{M622}/\texttt{M6513}/\ldots 仅作历史对照，新登记用下表细模块 id。
+\end{enumerate}
+
+\section{细模块总表（函数级）}
+
+\noindent{\small 排版说明：长 API 名经 \texttt{xurl} 的 \texttt{\textbackslash path} 允许断行；细模块 id 与建议 API \textbf{上下叠排}（三列），避免四列时等宽长串溢出叠字。}
+
+\begin{longtable}{L{6.2cm}L{6.8cm}L{2.2cm}}
+\caption{细模块代号与建议 API（不以章节粗切）\label{tab:mods}} \\
+\toprule
+\textbf{细模块 id / 建议 API} & \textbf{职责} & \textbf{溯源} \\
+\midrule
+\endfirsthead
+\multicolumn{3}{c}{\small（续表）细模块} \\
+\toprule
+\textbf{细模块 id / 建议 API} & \textbf{职责} & \textbf{溯源} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\secrow{—— 帧 / 符号定时（原 6.2.2.1--2）——}
+\modcell{frame.symDesign}{slbSelectSymbolDesign} &
+按 \texttt{symbolType} 查 CP/GAP/符号时长 &
+6.2.2.1 \\
+\modcell{frame.symPerRf}{slbCalculateSymbolsPerRadioFrame} &
+派生 $N_{\mathrm{sym}}^{\mathrm{frame}}$ &
+6.2.2.2 \\
+\modcell{frame.boundaryCp}{slbSelectBoundaryCpIndices} &
+标记一般/边界 CP 符号索引 &
+6.2.2.2 \\
+\modcell{frame.nCp}{slbCalculateNcp} &
+\texttt{symbolType}$\rightarrow N_{\mathrm{CP}}$（供 RS） &
+6.2.2$\leftrightarrow$6.5.3 \\
+\modcell{frame.superframe}{slbAdvanceSuperframeNumber} &
+超帧号循环；无线帧 \#0--\#7 &
+6.2.2.2 \\
+\secrow{—— TTI / COT / 链路布局（原 6.2.2.3/9/10）——}
+\modcell{tti.extent}{slbCalculateTtiRadioFrameCount} &
+$2^{nTti}$ &
+6.2.2.3 \\
+\modcell{tti.locate}{slbLocateCurrentTti} &
+由 COT 起止与当前帧定位 TTI 序号 &
+6.2.2.3 \\
+\modcell{tti.cotBounds}{slbApplyCotRadioFrameBounds} &
+写入/校验 COT 起止无线帧 &
+6.2.2.3 \\
+\modcell{link.layoutValidate}{slbValidateLinkSymbolLayout} &
+G 开头、末切换间隔、异链路间隔 &
+6.2.2.3 \\
+\modcell{link.symbolType}{slbSelectLinkSymbolType} &
+符号 $l\rightarrow$ G/T/A/D/\texttt{switchGap} &
+6.2.2.2/9 \\
+\modcell{link.gta}{slbSelectGtaLink} &
+通信域三链路方向与符号类型 &
+6.2.2.9 \\
+\modcell{link.passthrough}{slbSelectPassthroughRole} &
+直通先发/后发与 D 符号上下文 &
+6.2.2.10 \\
+\modcell{domain.scope}{slbSelectCommDomainScope} &
+通信域资源集合边界 &
+6.2.2.8 \\
+\secrow{—— 载波 / 网格 / RE（原 6.2.2.4--7）——}
+\modcell{carrier.nChLch}{slbValidateNchLchPair} &
+校验 18 档配对 &
+6.2.2.4 \\
+\modcell{carrier.wscgBound}{slbCalculateWorkingSubcarrierGroupBound} &
+$\lfloor 16 nCh/lCh\rfloor-1$ &
+6.2.2.4 \\
+\modcell{carrier.baseScGroup}{slbMapBaseSubcarrierGroupIndex} &
+有效子载波$\rightarrow$基础子载波组（跳 DC） &
+6.2.2.4 \\
+\modcell{port.validate}{slbValidateAntennaPortSharing} &
+SAB/G-PCIB/广播/G-DMRS-C 同端口等 &
+6.2.2.5 \\
+\modcell{grid.dims}{slbBuildResourceGridDims} &
+$161\times N_{\mathrm{sym}}^{\mathrm{frame}}$ 维 &
+6.2.2.6 \\
+\modcell{re.map}{slbMapResourceElement} &
+写入 $a_{k,l}^{(p)}$ &
+6.2.2.7 \\
+\modcell{re.validate}{slbValidateResourceElement} &
+禁 DC \#80；空闲 RE$\rightarrow$0 &
+6.2.2.7 \\
+\secrow{—— 物理层信号生成/映射（原 6.2.3，按信号拆）——}
+\modcellTwo{sig.fts}{slbGenerateFtsSequence}{slbMapFts} &
+FTS 序列与 RE 映射 &
+6.2.3 \\
+\modcellTwo{sig.sts}{slbGenerateStsSequence}{slbMapSts} &
+STS &
+6.2.3 \\
+\modcellTwo{sig.dmrs}{slbGenerateDmrsSequence}{slbMapDmrs} &
+DMRS（含 DMRS-D/C 等变体入参） &
+6.2.3 \\
+\modcellTwo{sig.csiRs}{slbGenerateCsiRsSequence}{slbMapCsiRs} &
+CSI-RS &
+6.2.3 \\
+\modcellTwo{sig.srs}{slbGenerateSrsSequence}{slbMapSrs} &
+SRS &
+6.2.3 \\
+\modcellTwo{sig.pms}{slbGeneratePmsSequence}{slbMapPms} &
+PMS（含安全 PMS 开关） &
+6.2.3.9 \\
+\secrow{—— 接入/空闲相关可配（原 6.2.7--10 可配项）——}
+\modcell{access.sabPeriod}{slbSelectSabPeriod} &
+SAB/广播周期配置 &
+6.2.7+ \\
+\modcell{access.contendBitmap}{slbSelectContendCarrierBitmap} &
+并行竞争基础载波集合 &
+6.2.7+ \\
+\modcell{access.idleGranularity}{slbSelectIdleGranularity} &
+空闲粒度（无线帧） &
+6.2.7+ \\
+\secrow{—— 通用库：CRC / Gold / RS（原 6.5.1--3）——}
+\modcell{crc.calculate}{slbCalculateCrc} &
+CRC 计算（多项式/掩码） &
+6.5.1 \\
+\modcell{gold.generate}{slbGenerateGoldSequence} &
+Gold PN 生成 &
+6.5.2 \\
+\modcell{rs.qpsk}{slbGenerateRsQpsk} &
+RS QPSK 序列 &
+6.5.3 \\
+\secrow{—— 功控 / 测量（原 6.5.4--5）——}
+\modcell{pwr.calculate}{slbCalculateTxPower} &
+发射功率（读 L1 $P_o$/$P_{\mathrm{MAX}}$） &
+6.5.4 \\
+\modcell{meas.rsrpRssi}{slbEstimateRsrpRssi} &
+同符号 RSRP/RSSI &
+6.5.5 \\
+\modcell{meas.cbraWindow}{slbSelectCbraMeasureWindow} &
+CBRA 测量窗 &
+6.5.5 \\
+\modcell{meas.pmsCsiMode}{slbSelectPmsCsiReportMode} &
+CSI 平均/按跳反馈 &
+6.5.5/6.6 \\
+\secrow{—— 调制 / 加扰 / SC-FDMA / ZC（原 6.5.6--9）——}
+\modcell{mod.map}{slbMapModulationSymbols} &
+比特$\rightarrow$调制符号（禁自主升阶） &
+6.5.6 \\
+\modcell{scramble.apply}{slbScrambleBits} &
+数据加扰 &
+6.5.7 \\
+\modcell{scfdma.generate}{slbGenerateScFdma} &
+SC-FDMA 变换 &
+6.5.8 \\
+\modcell{zc.generate}{slbGenerateZcSequence} &
+ZC 序列（$u,v,\alpha,M$） &
+6.5.9 \\
+\modcell{zc.groupHop}{slbCalculateGroupHop} &
+组跳 $n_{\mathrm{ID}}^X$ &
+6.5.9.1 \\
+\secrow{—— 定位编排（原 6.6，按流程函数拆）——}
+\modcell{pos.rttEstimate}{slbEstimateRttDistance} &
+两/三信号 RTT 解距 &
+6.6.2.1 \\
+\modcell{pos.flagSchedule}{slbScheduleFlagMeas} &
+FLAG 组测量编排 &
+6.6.2.2 \\
+\modcell{pos.hopSchedule}{slbScheduleHopRanging} &
+跳频复合测距编排 &
+6.6.2.3 \\
+\modcell{pos.aoaEstimate}{slbEstimateAoa} &
+到达角估计 &
+6.6.3 \\
+\modcell{pos.aodEstimate}{slbEstimateAod} &
+离开角估计 &
+6.6.3 \\
+\modcell{pos.solve}{slbCalculateNodePosition} &
+坐标解算（读 L1 锚点/角色） &
+6.6.4 \\
+\end{longtable}
+
+\noindent\textbf{建议目录}：\texttt{nearlink/slb/phy/<域>/}，文件名与 API 对齐（如 \texttt{select-symbol-design.c}）。\\
+\textbf{6.2.1} 仅为分类索引，\textbf{无独立细模块}（指向下游 \texttt{sig.*}/\texttt{re.*} 等）。
+
+\newpage
+%======================================================================
+\part{帧 / 资源细模块参数}
+%======================================================================
+
+\section{\texttt{frame.symDesign}：\texttt{slbSelectSymbolDesign}}
+
+读 L1 \texttt{symbolType}，查 L0 \regid{symbolDesignTable}。
+
+\begin{longtable}{L{5.4cm}L{3.8cm}L{4.5cm}L{1.4cm}}
+\caption{入参 / 出参\label{tab:frame-sym}} \\
+\toprule
+\textbf{id} & \textbf{工程名} & \textbf{说明} & \textbf{状态} \\
+\midrule
+（L1） & \texttt{symbolType} & 入参 & --- \\
+（L0 表） & \regid{symbolDesignTable} & 查表真源 & \texttt{frozen} \\
+\regid{slb.frame.generalCpLenTs} & \regid{generalCpLenTs} & 一般 CP 长 & \texttt{draft} \\
+\regid{slb.frame.generalSymbolLenTs} & \regid{generalSymbolLenTs} & 一般符号总长 & \texttt{draft} \\
+\regid{slb.frame.gap1LenTs} & \texttt{gap1LenTs} & GAP1（类型三/四可空） & \texttt{draft} \\
+\regid{slb.frame.boundarySymbolLenTs} & \regid{boundarySymbolLenTs} & 边界符号总长 & \texttt{draft} \\
+\bottomrule
+\end{longtable}
+
+\section{\texttt{frame.symPerRf} / \texttt{frame.boundaryCp} / \texttt{frame.nCp}}
+
+\begin{longtable}{L{5.4cm}L{3.8cm}L{4.5cm}L{1.4cm}}
+\caption{帧符号数与边界 CP\label{tab:frame-bcp}} \\
+\toprule
+\textbf{id} & \textbf{工程名} & \textbf{说明} & \textbf{状态} \\
+\midrule
+\regid{slb.frame.symbolsPerRadioFrame} &
+\regid{symbolsPerRadioFrame} &
+\regid{slbCalculateSymbolsPerRadioFrame} 输出 &
+\texttt{draft} \\
+\regid{slb.frame.isBoundaryCpSymbol} &
+\regid{isBoundaryCpSymbol} &
+\regid{slbSelectBoundaryCpIndices} 对 $l$ 的布尔/集合 &
+\texttt{draft} \\
+\regid{slb.frame.nCp} &
+\texttt{nCp} &
+\regid{slbCalculateNcp} 输出；供 \texttt{rs.qpsk} &
+\texttt{draft} \\
+\regid{slb.frame.symbolIndex} &
+\texttt{symbolIndex} &
+帧内 $l$（偏 L3） &
+\texttt{draft} \\
+\bottomrule
+\end{longtable}
+
+\section{\texttt{frame.superframe}：\texttt{slbAdvanceSuperframeNumber}}
+
+\begin{longtable}{L{5.4cm}L{3.8cm}L{4.5cm}L{1.4cm}}
+\caption{超帧运行时\label{tab:frame-sf}} \\
+\toprule
+\textbf{id} & \textbf{工程名} & \textbf{说明} & \textbf{状态} \\
+\midrule
+（L0） & \regid{superframeNumberMax} & 循环上界 65535 & \texttt{frozen} \\
+\regid{slb.frame.superframeNumber} & \regid{superframeNumber} & 当前超帧号（偏 L3） & \texttt{draft} \\
+\regid{slb.frame.radioFrameIndex} & \regid{radioFrameIndex} & \#0--\#7（偏 L3） & \texttt{draft} \\
+\bottomrule
+\end{longtable}
+
+\section{\texttt{tti.*}：TTI / COT}
+
+\begin{longtable}{L{5.4cm}L{3.8cm}L{4.5cm}L{1.4cm}}
+\caption{TTI/COT 细模块参数\label{tab:tti}} \\
+\toprule
+\textbf{id} & \textbf{工程名} & \textbf{说明} & \textbf{状态} \\
+\midrule
+（L1） & \texttt{nTti} / \regid{transmissionMode} & 会话配置 & --- \\
+\regid{slb.tti.radioFrameCount} &
+\regid{ttiRadioFrameCount} &
+$=2^{nTti}$（\texttt{tti.extent}） &
+\texttt{draft} \\
+\regid{slb.tti.sequenceIndex} &
+\regid{ttiSequenceIndex} &
+当前 TTI 顺序号（\texttt{tti.locate}） &
+\texttt{draft} \\
+\regid{slb.tti.cotStartRadioFrameIndex} &
+\regid{cotStartRadioFrameIndex} &
+COT 首帧（\texttt{tti.cotBounds}） &
+\texttt{draft} \\
+\regid{slb.tti.cotEndRadioFrameIndex} &
+\regid{cotEndRadioFrameIndex} &
+COT 末帧（含） &
+\texttt{draft} \\
+（L0） & \regid{switchGapSymbolCount} & 强制 $=1$ & \texttt{frozen} \\
+\bottomrule
+\end{longtable}
+
+\section{\texttt{link.*} / \texttt{domain.scope}}
+
+\begin{longtable}{L{5.4cm}L{3.8cm}L{4.5cm}L{1.4cm}}
+\caption{链路与域\label{tab:link}} \\
+\toprule
+\textbf{id} & \textbf{工程名} & \textbf{说明} & \textbf{状态} \\
+\midrule
+（L1） & \regid{linkSymbolLayout} / \texttt{domainType} & 会话布局/域 & --- \\
+\regid{slb.link.symbolType} &
+\regid{linkSymbolType} &
+G/T/A/D/\texttt{switchGap}（\texttt{link.symbolType}） &
+\texttt{draft} \\
+\regid{slb.link.passthroughRole} &
+\regid{passthroughRole} &
+先发/后发（\texttt{link.passthrough}） &
+\texttt{draft} \\
+\bottomrule
+\end{longtable}
+
+\noindent\texttt{link.layoutValidate}：无额外 L2 字段，读 L1 布局 + L0 \regid{switchGapSymbolCount}，失败返回错误码。\\
+\texttt{link.gta} / \texttt{domain.scope}：以枚举与范围校验为主，坐标真源在 L0/L1。
+
+\section{\texttt{carrier.*} / \texttt{port.validate} / \texttt{grid.dims} / \texttt{re.*}}
+
+\begin{longtable}{L{5.6cm}L{3.8cm}L{4.3cm}L{1.4cm}}
+\caption{载波 / 端口 / 网格 / RE\label{tab:carrier-re}} \\
+\toprule
+\textbf{id} & \textbf{工程名} & \textbf{说明} & \textbf{状态} \\
+\midrule
+（L1） & \texttt{nCh}/\texttt{lCh} & 会话选档 & --- \\
+（L0） & \regid{nChLchPairTable} 等 & 配对与 161/DC & \texttt{frozen} \\
+\regid{slb.carrier.baseCarrierIndex} &
+\regid{baseCarrierIndex} &
+基础载波序号（偏 L3） &
+\texttt{draft} \\
+\regid{slb.carrier.workingSubcarrierGroupIndex} &
+\regid{workingSubcarrierGroupIndex} &
+工作子载波组（偏 L3） &
+\texttt{draft} \\
+\regid{slb.port.antennaPort} &
+\texttt{antennaPort} &
+逻辑端口 $p$ &
+\texttt{draft} \\
+\regid{slb.re.subcarrierIndex} &
+\regid{subcarrierIndex} &
+$k\in[0,160]$ &
+\texttt{draft} \\
+\regid{slb.re.value} &
+\texttt{reValue} &
+$a_{k,l}^{(p)}$ &
+\texttt{draft} \\
+\bottomrule
+\end{longtable}
+
+\newpage
+%======================================================================
+\part{信号 / 接入 / 通用库 / 定位细模块参数}
+%======================================================================
+
+\section{\texttt{sig.*}：物理层信号（按信号函数拆）}
+
+各信号共用映射坐标来自 \texttt{re.*}/\texttt{frame.*}；序列常数 Phase B 按信号补全。
+
+\begin{longtable}{L{5.2cm}L{3.6cm}L{4.8cm}L{1.4cm}}
+\caption{信号细模块共用/可配\label{tab:sig}} \\
+\toprule
+\textbf{id} & \textbf{工程名} & \textbf{说明} & \textbf{状态} \\
+\midrule
+\regid{slb.sig.signalKind} &
+\texttt{signalKind} &
+调度选择：FTS/STS/DMRS/\ldots（路由到具体 \texttt{sig.*}） &
+\texttt{draft} \\
+\regid{slb.sig.sequenceRootU} &
+\regid{sequenceRootU} &
+ZC 类 $u$（PMS 等） &
+\texttt{draft} \\
+\regid{slb.sig.securePmsEnable} &
+\regid{securePmsEnable} &
+常由 L1 XRC；\texttt{sig.pms} 消费 &
+\texttt{draft} \\
+\regid{slb.sig.betaRs} &
+\texttt{betaRs} &
+参考信号功率缩放 &
+\texttt{draft} \\
+\regid{slb.sig.reMapSymbolIndex} &
+\regid{reMapSymbolIndex} &
+映射符号 $l$ &
+\texttt{draft} \\
+\bottomrule
+\end{longtable}
+
+\section{\texttt{access.*}}
+
+\begin{longtable}{L{5.4cm}L{3.8cm}L{4.5cm}L{1.4cm}}
+\caption{接入/空闲可配\label{tab:access}} \\
+\toprule
+\textbf{id} & \textbf{工程名} & \textbf{说明} & \textbf{状态} \\
+\midrule
+\regid{slb.access.sabPeriod} & \texttt{sabPeriod} & SAB/广播周期 & \texttt{draft} \\
+\regid{slb.access.contendCarrierBitmap} & \regid{contendCarrierBitmap} & 竞争载波集合 & \texttt{draft} \\
+\regid{slb.access.idleGranularity} & \regid{idleGranularity} & 空闲粒度=无线帧 & \texttt{draft} \\
+\bottomrule
+\end{longtable}
+
+\section{\texttt{crc.calculate} / \texttt{gold.generate} / \texttt{rs.qpsk}}
+
+\begin{longtable}{L{5.2cm}L{3.6cm}L{4.8cm}L{1.4cm}}
+\caption{CRC / Gold / RS-QPSK\label{tab:crc-gold-rs}} \\
+\toprule
+\textbf{id} & \textbf{工程名} & \textbf{说明} & \textbf{状态} \\
+\midrule
+\regid{slb.crc.poly} & \texttt{crcPoly} & 多项式枚举 & \texttt{draft} \\
+\regid{slb.crc.payloadBitCountA} & \regid{payloadBitCountA} & 信息比特长 $A$ & \texttt{draft} \\
+\regid{slb.crc.mask} & \texttt{crcMask} & 仅 $L{=}24$ & \texttt{draft} \\
+\regid{slb.gold.cInit} & \texttt{goldCInit} & Gold 初态 & \texttt{draft} \\
+\regid{slb.gold.pnLength} & \regid{goldPnLength} & PN 长度 & \texttt{draft} \\
+\regid{slb.rs.radioFrameIndexN} & \regid{radioFrameIndexN} & RS 用帧号 $n$ & \texttt{draft} \\
+\regid{slb.rs.symbolIndexL} & \regid{symbolIndexL} & RS 用符号 $l$ & \texttt{draft} \\
+\regid{slb.rs.nCp} & \texttt{nCp} & 来自 \texttt{frame.nCp} & \texttt{draft} \\
+\bottomrule
+\end{longtable}
+
+\noindent\textbf{禁}：\texttt{gold.generate} 与 \texttt{scramble.apply} / \texttt{zc.groupHop} 共用同一流偏移。
+
+\section{\texttt{pwr.calculate} / \texttt{meas.*}}
+
+\begin{longtable}{L{5.4cm}L{3.8cm}L{4.5cm}L{1.4cm}}
+\caption{功控与测量\label{tab:pwr-meas}} \\
+\toprule
+\textbf{id} & \textbf{工程名} & \textbf{说明} & \textbf{状态} \\
+\midrule
+（L1 各 $P_o$/$P_{\mathrm{MAX}}$/参考功率） & --- & \textbf{归 Session}；本函数只读 & --- \\
+\regid{slb.pwr.allocSubcarrierCountM} & \regid{allocSubcarrierCountM} & 当次 $M$；偏 L3 & \texttt{draft} \\
+\regid{slb.pwr.coScheduledSignalCountN} & \regid{coScheduledSignalCountN} & 同符号多业务数 & \texttt{draft} \\
+\regid{slb.pwr.limitSubcarrierCountK} & \regid{limitSubcarrierCountK} & 限幅后均分 $K$ & \texttt{draft} \\
+\regid{slb.meas.symbolIndex} & \regid{measSymbolIndex} & RSRP/RSSI 同符号 & \texttt{draft} \\
+\regid{slb.meas.cbraWindow} & \regid{cbraMeasureWindow} & CBRA 窗 & \texttt{draft} \\
+\regid{slb.meas.pmsCsiReportMode} & \regid{pmsCsiReportMode} & 1/2 & \texttt{draft} \\
+\bottomrule
+\end{longtable}
+
+\section{\texttt{mod.map} / \texttt{scramble.apply} / \texttt{scfdma.generate} / \texttt{zc.*}}
+
+\begin{longtable}{L{5.4cm}L{3.6cm}L{4.6cm}L{1.4cm}}
+\caption{调制 / 加扰 / SC-FDMA / ZC\label{tab:mod-zc}} \\
+\toprule
+\textbf{id} & \textbf{工程名} & \textbf{说明} & \textbf{状态} \\
+\midrule
+（L1） & \texttt{modType}/\texttt{mcsIndex} & 禁自主升阶 & --- \\
+\regid{slb.mod.bitCount} & \texttt{bitCount} & 须被阶数 $m$ 整除 & \texttt{draft} \\
+\regid{slb.scramble.cInit} & \regid{scrambleCInit} & 帧/$N_{\mathrm{G-PID}}$/业务 & \texttt{draft} \\
+\regid{slb.scfdma.mScTotal} & \texttt{mScTotal} & DFT 长度 & \texttt{draft} \\
+\regid{slb.zc.rootU} & \texttt{zcRootU} & 0--29 & \texttt{draft} \\
+\regid{slb.zc.cyclicShiftV} & \regid{zcCyclicShiftV} & 循环移位 & \texttt{draft} \\
+\regid{slb.zc.alpha} & \texttt{zcAlpha} & 相位旋转 & \texttt{draft} \\
+\regid{slb.zc.seqLengthM} & \regid{zcSeqLengthM} & ZC 长 & \texttt{draft} \\
+\regid{slb.zc.slotIndexNs} & \texttt{slotIndexNs} & 组跳时隙 & \texttt{draft} \\
+\regid{slb.zc.groupHopIdX} & \texttt{groupHopIdX} & $n_{\mathrm{ID}}^X$ & \texttt{draft} \\
+\bottomrule
+\end{longtable}
+
+\section{\texttt{pos.*}：定位流程函数}
+
+\begin{longtable}{L{5.4cm}L{3.8cm}L{4.5cm}L{1.4cm}}
+\caption{定位细模块参数\label{tab:pos}} \\
+\toprule
+\textbf{id} & \textbf{工程名} & \textbf{说明} & \textbf{状态} \\
+\midrule
+\regid{slb.pos.rttMode} & \texttt{rttMode} & 两信号/三信号 & \texttt{draft} \\
+\regid{slb.pos.t1Us}--\texttt{t6Us} & \texttt{t1Us}\ldots\texttt{t6Us} & TOA/TOD 样本；偏 L3 & \texttt{draft} \\
+\regid{slb.pos.measGroupId} & \texttt{measGroupId} & FLAG 测量组 & \texttt{draft} \\
+\regid{slb.pos.memberPhyIdList} & \regid{memberPhyIdList} & 发信/报告顺序（禁重排） & \texttt{draft} \\
+\regid{slb.pos.pmsRootU} & \texttt{pmsRootU} & $\neq$ L1 \regid{syncSequenceU} & \texttt{draft} \\
+\regid{slb.pos.minPmsSymbolCount} & \regid{minPmsSymbolCount} & $\ge 2$ & \texttt{draft} \\
+\regid{slb.pos.m2mIdleSymbolGap} & \regid{m2mIdleSymbolGap} & $\ge 1$ & \texttt{draft} \\
+\regid{slb.pos.dlAnchorSymbolGap} & \regid{dlAnchorSymbolGap} & $\ge 1$ & \texttt{draft} \\
+\regid{slb.pos.sulTagSymbolGap} & \regid{sulTagSymbolGap} & $\ge 0$ & \texttt{draft} \\
+\regid{slb.pos.rfSettleTimeUs} & \regid{rfSettleTimeUs} & $T_{\mathrm{RF}}$ & \texttt{draft} \\
+\regid{slb.pos.hopPattern} & \texttt{hopPattern} & 跳频图案 & \texttt{draft} \\
+\regid{slb.pos.partialFeedbackP} & \regid{partialFeedbackP} & $\{2,4,8\}$ & \texttt{draft} \\
+\regid{slb.pos.hopPreambleVersion} & \regid{hopPreambleVersion} & 初信道/跳频 & \texttt{draft} \\
+\regid{slb.pos.aoaCapable} & \regid{aoaEstimationCapable} & 能力门控 & \texttt{draft} \\
+\regid{slb.pos.aodCapable} & \regid{aodEstimationCapable} & 能力门控 & \texttt{draft} \\
+\regid{slb.pos.portCount} & \texttt{portCount} & $\le$ 能力 & \texttt{draft} \\
+\regid{slb.pos.beamCount} & \texttt{beamCount} & $\le$ 能力 & \texttt{draft} \\
+\regid{slb.pos.fixPathMode} & \texttt{fixPathMode} & SA/SD/MA/\ldots & \texttt{draft} \\
+\regid{slb.pos.aoaAzimuthDeg} & \regid{aoaAzimuthDeg} & 结果；偏 L3 & \texttt{draft} \\
+\regid{slb.pos.aoaElevationDeg} & \regid{aoaElevationDeg} & 结果；偏 L3 & \texttt{draft} \\
+\bottomrule
+\end{longtable}
+
+\noindent 角色 / 坐标系 / 锚点坐标等\textbf{归 L1 Session / XRC}。光速默认用 L0 \regid{speedOfLightMps}。
+
+\newpage
+%======================================================================
+\part{边界、对照与下一步}
+%======================================================================
+
+\section{旧章节代号 $\rightarrow$ 细模块（历史对照）}
+
+\begin{longtable}{L{2.4cm}L{12.0cm}}
+\caption{废弃粗切代号对照\label{tab:legacy}} \\
+\toprule
+\textbf{旧代号} & \textbf{拆入细模块} \\
+\midrule
+M622 &
+\texttt{frame.*} / \texttt{tti.*} / \texttt{link.*} / \texttt{domain.scope} / \texttt{carrier.*} / \texttt{port.validate} / \texttt{grid.dims} / \texttt{re.*} \\
+M623 &
+\texttt{sig.fts}/\texttt{sts}/\texttt{dmrs}/\texttt{csiRs}/\texttt{srs}/\texttt{pms} \\
+M627 &
+\texttt{access.*} \\
+M6513 &
+\texttt{crc.calculate} / \texttt{gold.generate} / \texttt{rs.qpsk} \\
+M6545 &
+\texttt{pwr.calculate} / \texttt{meas.*} \\
+M656 &
+\texttt{mod.map} \\
+M6579 &
+\texttt{scramble.apply} / \texttt{scfdma.generate} / \texttt{zc.generate} / \texttt{zc.groupHop} \\
+M66P2--P6 &
+\texttt{pos.rttEstimate} / \regid{flagSchedule} / \texttt{hopSchedule} / \texttt{aoaEstimate} / \texttt{aodEstimate} / \texttt{solve} \\
+\bottomrule
+\end{longtable}
+
+\section{L1 vs L2 速查}
+
+\begin{longtable}{L{5.5cm}L{9.0cm}}
+\caption{勿把 L1 再当 L2 真源\label{tab:l1l2}} \\
+\toprule
+\textbf{量} & \textbf{正确归属} \\
+\midrule
+$f_s$、$\Delta f$、161、DC、光速、符号设计表、$N_{\mathrm{CH}}$表 & L0 \\
+\texttt{nTti}、\texttt{nCh}、\texttt{symbolType}、布局、域类型、各 $P_o$、MCS、PhyID、XRC & L1 SessionConfig \\
+本册各细模块表中的可配/调用量 & \textbf{L2 / 偏 L3} \\
+TOA 样本、AirCommand、报告 IE & L3（接口暴露） \\
+\bottomrule
+\end{longtable}
+
+\section{Phase A 统计与缺口}
+
+\begin{itemize}[nosep]
+  \item 模块切分已改为\textbf{函数级细模块 + 建议 API}；不再以章节 \texttt{.tex} 为模块边界；
+  \item 帧/资源（原 6.2.2）已拆到 \texttt{frame.*}/\texttt{tti.*}/\texttt{link.*}/\texttt{carrier.*}/\texttt{re.*} 等；
+  \item 信号侧 \texttt{sig.*} 仅共用参数粗提，各序列常数待 Phase B；
+  \item 与上层仿真平台对齐后：平台下发量回写 L1，本册只保留函数局部可配。
+\end{itemize}
+
+\section{建议下一步}
+
+\begin{enumerate}[nosep]
+  \item 按细模块优先实现：建议先 \texttt{frame.symDesign}$\rightarrow$\texttt{re.validate} 再 \texttt{mod.map}/\texttt{crc.calculate}；
+  \item Phase B：为每个建议 API 补范围、默认、拒配与单测名；
+  \item 参数 id 旧前缀（\regid{slb.m622.*} 等）以本册新前缀为准，代码侧一次性迁移。
+\end{enumerate}
+
+\vspace{1.2em}
+{\small\textcolor{gray}{Phase A 粗提稿；以正式标准与有效分册为准。切分以函数为准，节号仅溯源。}}
+
+\end{document}

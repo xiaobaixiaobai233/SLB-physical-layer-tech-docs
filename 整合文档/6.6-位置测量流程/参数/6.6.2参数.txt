@@ -1,0 +1,140 @@
+# 6.6.2 距离位置信息测量 — 模块实现参数清单（详尽 I/O）
+# 含 6.6.2.1 RTT / 6.6.2.2 FLAG / 6.6.2.3 跳频复合 + 附录 L
+# airMode=slb；嵌套：只引用他模块输出
+
+════════════════════════════════════════
+6.6.2.1 RTT 测距（必选）
+建议 API: slbPosBuildRttAirPlan / slbPosOnToaTodSample
+          slbCalculateRttDistance / slbPosBuildTimeDiffIe
+════════════════════════════════════════
+
+【本模块输出】
+  rttAirCommands[]           TX/RX 空口命令（何时发/收 PMS）
+  taUs, tbUs, tcUs, tdUs       时间差（未用置 NaN）
+  distanceM                  点对点距离 D（米）
+  timeDiffReportIe           待封装时间差报告 IE
+
+【本模块输入 — 直接】
+  L1/上下文: SlbPosContext（角色、资源、可选安全 PMS）
+  L2: rttMode = TWO_SIG | THREE_SIG
+  L0: speedOfLightMps = 299792458.0（默认）
+  L3: t1Us..t6Us             本地离开/到达时刻（相对首个测量符号起点；多端口联合）
+
+【本模块输入 — 他模块输出】
+  引用 → 6.6.1 输出: SlbPosContext / 当次 GCI1--3 资源
+  引用 → 6.2.3.9 输出: pmsMappedRe（空口载体；不展开 PMS 序列入参）
+  引用 → 6.5.5.7 输出: toaUs / todUs 时间戳原语（采样写入 t1..t6）
+  引用 → 6.2.4.6.6 输出: GCI 格式1--3 资源指示（或 XRC 静态）
+
+【计算公式（输出 distanceM）】
+  两信号: Ta=t4-t1, Tb=t3-t2；D=(Ta-Tb)/2 · C
+  三信号: 另加 Tc,Td；D=(Ta·Td - Tb·Tc)/(Ta+Tb+Tc+Td) · C
+  报告: 第一节点报 Ta（三信号报 Ta+Tc）；第二节点报 Tb（三信号报 Tb+Td）
+
+【数据流】
+  R1 角色+资源 → 会话上下文
+  R2 PMS 时机 → t1..t6
+  R3 本地时刻 → Ta..Td 报告
+  R4 汇聚 Ta..Td → distanceM → 交 6.6.4 或本地应用
+
+════════════════════════════════════════
+6.6.2.2 FLAG 快速定位（可选）
+建议 API: slbPosSetupMeasGroup / slbPosOnGciFormat4
+          slbPosSelectNextTxPhyId / slbPosBuildFlagAirPlan
+          slbPosCollectToaSet
+  模式: M2M / DL / SUL / AUL
+════════════════════════════════════════
+
+【本模块输出】
+  measGroupContext           组上下文
+    measGroupId
+    phyIdOrder[]             发信顺序=报告顺序（禁止重排）
+    nodeRoleBitmap           锚点/标签身份
+    flagMeasMode             M2M|DL|SUL|AUL
+    signalMode               两信号|三信号|循环三信号
+    measReportDirection      →G / 锚点→标签 / 循环(=5)
+    pmsRootIndexU            须 ≠ G 同步块 u
+    pmsSymbolCount           ≥2
+    idleGapSymbolCount       M2M 轮次间隔 ≥1；DL 锚点间隔 ≥1
+    periodField              DL: 0=仅一轮
+    allowTxPms               GCI-4 激活后才为真
+  flagAirCommands[]          TX/RX 命令序列
+  nextTxPhyId                下一发信成员（或结束）
+  distanceMatrixM[][]        M2M/循环：点对点距离矩阵 D_ij
+  tdoaInputSet[]             DL/SUL/AUL：多锚 TOA 集（交 6.6.4 MT）
+
+【本模块输入 — 直接】
+  L1: measGroupSetupMsg      组ID、PhyID序、位图、组播地址
+  L1: measGroupParamMsg      模式、信号形态、PMS类型/带宽/u、报告方向、间隔
+  L3: gciFormat4             组ID、激活位、报告调度 bit10--11
+  L3: sabSyncDone            同步完成（硬前置）
+  L3: toaUsPerAnchor[]       各锚点 TOA（TDOA 路径）
+
+【本模块输入 — 他模块输出】
+  引用 → 6.6.1 输出: SlbPosContext / groupcastAddress / 能力位
+  引用 → 6.2.4.6.6 输出: GCI 第四格式解码（激活≠建组完成）
+  引用 → 6.2.3.9 输出: pmsMappedRe（FLAG 专用 PMS）
+  引用 → 6.5.5.7 输出: toaUs/todUs → 组内 RTT 或 TDOA
+  引用 → 6.6.2.1 输出: distanceM（组内两两 RTT 解距时可复用公式）
+
+【开测条件（强制）】
+  建组就绪 ∧ 参数就绪 ∧ sabSyncDone ∧ gciFormat4.activate==1
+  F1/F2 完成 ≠ 开测；扳机仅为 F3 的 GCI-4
+
+【模式差异（输出侧）】
+  M2M: 三轮 锚→标→锚；≥1 空闲符号；产出距离矩阵
+  DL:  成员全锚点；标签不发 PMS；锚点互测；周期0仅一轮；TDOA 输入
+  SUL: 两次 GCI-4（先 DL 同步锚点，再标签上行）
+  AUL: 单次 GCI-4；锚点不发 PMS；锚点已时频对齐前提
+
+════════════════════════════════════════
+6.6.2.3 跳频复合测距（可选）+ 附录 L
+建议 API: slbPosApplyHopConfig / slbPosAdvanceHopIndex
+          slbCalculateCompositeCsi / slbStitchHoppedCompositeCsi
+          slbEstimateDistanceFromCompositeCsi / slbResolveHopRangingDistance
+════════════════════════════════════════
+
+【本模块输出】
+  hopContext
+    hopPattern[]             跳频图案（载波序列）
+    rfSettleTimeUs           T_RF = max(T_RF,1, T_RF,2)
+    csiReportMode / partialP P∈{2,4,8} 或全反馈
+    preambleVersion          初信道 00；跳频 01
+    lbtEnabled / lbtMaxWinUs 非连续跳频 LBT
+    currentHopIndex
+  perHopCsiCache[]           按载波号索引的双边 CSI
+  compositeCsiH2w[]          H^{2W}[k] = H^R[k] × H^I[k]
+  stitchedWidebandCsi[]      跨载波拼接后等效大带宽 CSI
+  distanceM                  解距输出 D
+
+【本模块输入 — 直接】
+  L1 配置 a)--l) 齐套（能力交互后）:
+    hopPattern[], rfSettleTimeUs, LBT 窗口,
+    CSI 全/部分反馈、生成方式、端口/波束双向单元、T3=T4 回程间隔等
+  L3: first/secondMeasResource  第一/第二测量信号时频（GCI 或 XRC）
+  L3: perHopBilateralCsiIq[]    两端上报 CSI（含最低频基础载波号）
+  L3: freqHzPerHop[]            各跳中心/子载波频率（拼接用）
+  L2: cfoScoCompEnable          宜先 CFO/SCO 补偿（附录 L）
+
+【本模块输入 — 他模块输出】
+  引用 → 6.6.1 输出: 跳频能力与静态上下文（不走测量组/GCI-4）
+  引用 → 6.2.3.9 输出: pmsMappedRe（各跳 PMS）
+  引用 → 6.5.5.6 输出: pmsIqLinear / pmsRplDbm（CSI 测量原语）
+  引用 → 8.3 输出: baseChannelCenterFreqHz（跳频载波频率）
+  附录 L 内核（本子模块内）: 复合相位 φ_2W = -4π(f^R-f^I)·r/c0
+
+【开测条件】
+  能力交互完成 ∧ 配置 a)--l) 齐套 ∧ 跳频定时
+  不依赖测量组 / GCI-4
+
+【数据流】
+  H1 配置 → hopContext
+  H2 初始信道双向 CSI → 缓存
+  H3 切跳(等 T_RF / LBT) → 各跳 CSI
+  H4 汇聚双边 CSI
+  H5 复合+拼接+解距 → distanceM → 交 6.6.4
+
+【CSI 反馈约束】
+  全反馈: 160 IQ/载波；DC 不反馈
+  部分反馈 P∈{2,4,8} 须与协商一致
+  前导版本与信道状态一致（00/01）

@@ -1,0 +1,174 @@
+% !TEX program = xelatex
+\documentclass[10pt,a4paper]{ctexart}
+
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{enumitem}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{xurl}
+\usepackage{hyperref}
+
+\geometry{left=1.8cm,right=1.8cm,top=2.2cm,bottom=2.2cm}
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue}
+
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newcolumntype{C}[1]{>{\centering\arraybackslash}p{#1}}
+\urlstyle{tt}
+\newcommand{\eng}[1]{\begingroup\footnotesize\path{#1}\endgroup}
+\newcommand{\tid}[1]{\begingroup\footnotesize\path{#1}\endgroup}
+\newcommand{\ideng}[2]{\tid{#1}\newline\eng{#2}}
+
+\title{%
+  \textbf{星闪 SLB 物理层}\\[0.3em]
+  \Large 6.6 相关参数四层整合登记（L0--L3）\\[0.2em]
+  \large 位置测量流程 \textbullet\ Phase A
+}
+\author{从来源：6.6.1--6.6.4 参数清单与接口暴露整合\\
+airMode\,=\,\texttt{slb}；长 id 叠排防叠字
+}
+\date{2026 年 7 月 28 日}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+\section{四层约定}
+\begin{longtable}{C{1.2cm}L{3.2cm}L{5.5cm}L{5cm}}
+\caption{L0--L3}\label{tab:ly} \\
+\toprule\textbf{层}&\textbf{含义}&\textbf{写}&\textbf{读}\\\midrule
+L0 & 常量（光速、坐标系、门限类） & 无 & 全定位链 \\
+L1 & XRC/能力/会话 $\to$ \eng{SlbPosContext} & 第7章/MAC & 6.6 只读 \\
+L2 & 模块可调（最小锚点数、补偿开关等） & 本模块 & 本模块 \\
+L3 & 当次测量/命令/IE & 生产者 & 消费者 \\
+\bottomrule
+\end{longtable}
+
+%======================================================================
+\part{L0}
+%======================================================================
+
+\begin{longtable}{L{7.5cm}L{7.7cm}}
+\caption{L0}\label{tab:l0} \\
+\toprule\textbf{id / 工程名}&\textbf{说明}\\\midrule
+\endfirsthead
+\toprule\textbf{id / 工程名}&\textbf{说明}\\\midrule
+\endhead\bottomrule\endfoot
+\ideng{slb.phy.speedOfLightMps}{speedOfLightMps} & 默认 $299792458$；RTT/TDOA/附录 L \\
+\tid{slb.phy.aoaCoordConvention} & $Z$ 法线、$X$ 正南、$Y$ 正东 \\
+\ideng{slb.phy.aoaAzimuthRangeDeg}{aoaAzimuthDeg} & $[0,360)$ \\
+\ideng{slb.phy.aoaElevationRangeDeg}{aoaElevationDeg} & $[0,180]$ \\
+\ideng{slb.pos.csiFullIqPerCarrier}{csiFullIqPerCarrier} & 全反馈 160；DC 不反馈 \\
+\ideng{slb.pos.csiPartialPSet}{csiPartialP} & $\{2,4,8\}$ \\
+\end{longtable}
+
+%======================================================================
+\part{L1}
+%======================================================================
+
+\begin{longtable}{L{7.5cm}L{7.7cm}}
+\caption{L1 会话/XRC 已解析字段}\label{tab:l1} \\
+\toprule\textbf{id / 工程名}&\textbf{说明}\\\midrule
+\endfirsthead
+\toprule\textbf{id / 工程名}&\textbf{说明}\\\midrule
+\endhead\bottomrule\endfoot
+\ideng{slb.session.localPhyId}{localPhyId} & 本节点 PhyID \\
+\ideng{slb.session.ofdmPositioningCapable}{ofdmPositioningCapable} & RTT 门控 \\
+\ideng{slb.session.posFrameType}{frameType} & ABS/REL \\
+\ideng{slb.session.fixNodePhyId}{fixNodePhyId} & 解算节点 \\
+\ideng{slb.session.anchorXyzM}{anchorXyzM} & 锚点已知坐标（m） \\
+\ideng{slb.session.optionalMeasBitmap}{optionalMeasBitmap} & TOD/TOA/AoA/AoD/CSI \\
+\ideng{slb.session.groupcastAddress}{groupcastAddress} & FLAG 组播 \\
+\ideng{slb.session.aoAEstimationCapable}{aoAEstimationCapable} & 能力 IE \\
+\ideng{slb.session.aoDEstimationCapable}{aoDEstimationCapable} & 能力 IE \\
+\ideng{slb.session.flagCapable}{flagCapable} & FLAG 可选 \\
+\ideng{slb.session.hopRangingCapable}{hopRangingCapable} & 跳频可选 \\
+\ideng{slb.session.hopPattern}{hopPattern} & 跳频图案 \\
+\ideng{slb.session.rfSettleTimeUs}{rfSettleTimeUs} & $T_{\mathrm{RF}}$ \\
+\ideng{slb.session.beamTable}{beamTable} & AoD 波束表 \\
+\end{longtable}
+
+%======================================================================
+\part{L2}
+%======================================================================
+
+\begin{longtable}{L{7.5cm}L{7.7cm}}
+\caption{L2}\label{tab:l2} \\
+\toprule\textbf{id / 工程名}&\textbf{说明}\\\midrule
+\endfirsthead
+\toprule\textbf{id / 工程名}&\textbf{说明}\\\midrule
+\endhead\bottomrule\endfoot
+\ideng{slb.pos.minAnchorCount}{minAnchorCountN} & 多锚建议 $\ge2$ \\
+\ideng{slb.pos.cfoScoCompEnable}{cfoScoCompEnable} & 附录 L 宜补偿 \\
+\ideng{slb.pos.beamIndexToAngleMap}{beamIndexToNominalAngle} & AoD 序号$\to$角（实现） \\
+\ideng{slb.pos.rttDefaultMode}{rttMode} & 两/三信号默认 \\
+\end{longtable}
+
+%======================================================================
+\part{L3}
+%======================================================================
+
+\section{配置/空口/同步事件}
+
+\begin{longtable}{L{7.0cm}L{2.6cm}L{5.6cm}}
+\caption{L3 编排}\label{tab:l3a} \\
+\toprule\textbf{id / 工程名}&\textbf{生产者}&\textbf{消费者}\\\midrule
+\endfirsthead
+\toprule\textbf{id / 工程名}&\textbf{生产者}&\textbf{消费者}\\\midrule
+\endhead\bottomrule\endfoot
+\ideng{slb.rt.posContext}{SlbPosContext} & 6.6.1 角色与汇聚 & 全 6.6 \\
+\ideng{slb.rt.gciFormat0to2}{gciResource} & 6.2.4.6.6 GCI资源指示 & 6.6.1/2/3 \\
+\ideng{slb.rt.gciFormat4}{gciFormat4} & 6.2.4.6.6 GCI第四格式 & 6.6.2.2 FLAG \\
+\ideng{slb.rt.sabSyncDone}{syncReadyFlag} & SAB/FTS 同步 & FLAG/MT \\
+\ideng{slb.rt.allowTxPms}{allowTxPms} & 6.6.2.2 FLAG & 空口 TX \\
+\ideng{slb.rt.aggregatedMeasSet}{aggregatedMeasSet} & 6.6.1 角色与汇聚 & 6.6.4 解算 \\
+\end{longtable}
+
+\section{测距/测角/解算交换}
+
+\begin{longtable}{L{7.0cm}L{3.4cm}L{4.8cm}}
+\caption{L3 测量与坐标}\label{tab:l3b} \\
+\toprule\textbf{id / 工程名}&\textbf{生产者}&\textbf{消费者}\\\midrule
+\endfirsthead
+\toprule\textbf{id / 工程名}&\textbf{生产者}&\textbf{消费者}\\\midrule
+\endhead\bottomrule\endfoot
+\ideng{slb.rt.t1toT6Us}{t1Us..t6Us} & 6.5.5.7 TOA/TOD & 算 $T_a$--$T_d$ \\
+\ideng{slb.rt.taTbTcTdUs}{taUs..} & 6.6.2.1 RTT & 距离/报告 \\
+\ideng{slb.rt.distanceM}{distanceM} & 6.6.2 距离测量 & 6.6.4 SA/SD/MR \\
+\ideng{slb.rt.distanceMatrixM}{distanceMatrixM} & 6.6.2.2 FLAG & 6.6.4 解算 \\
+\ideng{slb.rt.tdoaInputSet}{tdoaInputSet} & 6.6.2.2 FLAG & 6.6.4 MT \\
+\ideng{slb.rt.compositeCsiH2w}{compositeCsiH2w} & 6.6.2.3 跳频复合 & 解距 \\
+\ideng{slb.rt.aoaMeasSet}{aoaMeasSet} & 6.6.3.1 AoA & 6.6.4 SA/MA \\
+\ideng{slb.rt.aodMeasSet}{aodMeasSet} & 6.6.3.2 AoD & 6.6.4 SD/MD \\
+\ideng{slb.rt.beamIndex}{beamIndex} & 6.6.3.2 AoD & 解算/报告 \\
+\ideng{slb.rt.tagXyzM}{tagXyzM} & 6.6.4 定位解算 & 应用/MAC \\
+\end{longtable}
+
+\section{边界引用}
+\begin{longtable}{L{4.5cm}L{4.5cm}L{6.2cm}}
+\caption{跨章输出（本册只引用）}\label{tab:b} \\
+\toprule\textbf{来源}&\textbf{输出}&\textbf{消费者}\\\midrule
+\endfirsthead
+\toprule\textbf{来源}&\textbf{输出}&\textbf{消费者}\\\midrule
+\endhead\bottomrule\endfoot
+第7章 XRC/能力IE & 已解析字段 & 6.6.1 角色与汇聚 \\
+6.2.3.9 PMS波形 & \eng{pmsMappedRe} & 6.6.2 测距 / 6.6.3 测角 \\
+6.2.4.6.6 GCI资源指示 & GCI/TCI 解码 & 6.6.1/2 \\
+6.5.5.6 PMS-CSI测量 & PMS CSI & 6.6.2.3 跳频 \\
+6.5.5.7 TOA/TOD & 时间戳 & 6.6.2.1/2/4 \\
+6.5.5.8 AoA角度测量量 & 水平/垂直角 & 6.6.3.1 AoA \\
+8.3 信道中心频率 & 载波中心频 & 跳频拼接 \\
+\end{longtable}
+
+\section{检查清单}
+\begin{itemize}[nosep]
+  \item RTT 必选；FLAG/跳频按能力；
+  \item GCI-4 激活$\neq$建组完成；
+  \item 单锚 SA/SD 双输入强制；
+  \item 禁止 raw ASN.1；naming 带单位后缀。
+\end{itemize}
+
+\end{document}

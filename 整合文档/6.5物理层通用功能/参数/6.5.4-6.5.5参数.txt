@@ -1,0 +1,130 @@
+# 6.5.4–6.5.5 功率控制与测量量 — 模块实现参数清单（补全）
+# airMode=slb；命名遵循 nearlink-naming
+# 规则：实现本模块所需参数全部列出；若依赖他模块算出的量，只写「他模块输出」，不展开他模块入参。
+
+────────────────────────────────────────
+6.5.4 功率控制
+建议 API: slbCalculatePathloss / slbCalculateTxPower / slbApplyPmaxLimit
+────────────────────────────────────────
+【本模块输出】
+  pathlossDb                 P_L = gLinkReferenceSignalPower - RSRP
+  txPowerTotalDbm            单业务 P = 10·log10(M) + P_o + P_L
+  txPowerPerScLin[]          限幅后每子载波线性功率 P̂_k（mW）
+  txPowerCappedLin           多业务汇总后总线性功率 min(P̂_MAX, ΣP̂_i)
+
+【本模块直接入参】
+  L1: gLinkReferenceSignalPowerDbm
+  L1: srsP0NominalDbm / rachP0NominalDbm / ackP0NominalDbm /
+      dataClass1P0NominalDbm / dataClass2P0NominalDbm（按业务选 P_o）
+  L1: pMaxDbm（→ P̂_MAX，与第8章能力对齐）
+  L3/调度: occupiedSubcarrierCount M（≥1）
+  L3/调度: totalSubcarrierCountK（共符号子载波数，限幅均分用）
+  L3: perServicePowerLin[]（多业务线性功率列表）
+  引用 → 6.5.5.1 输出: rsrpDbm（路径损耗直接输入；不展开 RSRP 内部）
+
+【适用范围（约束）】
+  T 节点 T 符号：SRS/DMRS/PAS/接入/ACK/一类·二类数据及其配套 RS
+
+【不展开】
+  6.5.5.1 训练 RE 平均细节；调度如何决定 M/业务集合
+
+────────────────────────────────────────
+6.5.5.1 RSRP
+建议 API: slbEstimateRsrp
+────────────────────────────────────────
+【本模块输出】
+  rsrpLin / rsrpDbm          第一训练信号有效 RE 线性平均功率（多天线取 max）
+
+【本模块直接入参】
+  L3: trainingRePowerLin[]（有效 RE 线性功率样本）
+  L3: antennaCount
+  引用 → 6.2.3.1 输出: ftsMappedRe / 训练符号位置（仅知测哪些 RE，不展开 FTS 序列）
+
+────────────────────────────────────────
+6.5.5.2 RSSI
+建议 API: slbEstimateRssi
+────────────────────────────────────────
+【本模块输出】
+  rssiLin / rssiDbm          整 CP-OFDM 符号总接收功率线性平均（多天线 max）
+
+【本模块直接入参】
+  L3: symbolTotalPowerLin[]（整符号 RE 功率，含干扰/噪声）
+  L3: antennaCount
+  引用 → 6.2.2.1 输出: 符号时长上下文（测量窗口粒度，仅引用）
+
+────────────────────────────────────────
+6.5.5.3 RSRQ
+建议 API: slbCalculateRsrq
+────────────────────────────────────────
+【本模块输出】
+  rsrq                       RSRP/RSSI（同符号）
+
+【本模块直接入参】
+  引用 → 6.5.5.1 输出: rsrpLin
+  引用 → 6.5.5.2 输出: rssiLin
+  约束: 二者必须同一测量符号
+
+────────────────────────────────────────
+6.5.5.4 SINR
+建议 API: slbCalculateSinr
+────────────────────────────────────────
+【本模块输出】
+  sinr                       RSRP/(RSSI-RSRP)；分母≤0 → 错误/钳位
+
+【本模块直接入参】
+  引用 → 6.5.5.1 输出: rsrpLin
+  引用 → 6.5.5.2 输出: rssiLin（同符号）
+
+────────────────────────────────────────
+6.5.5.5 CBRA
+建议 API: slbCalculateCbra / slbSelectCbraMeasureWindow
+────────────────────────────────────────
+【本模块输出】
+  cbra                       T_busy / T_measure ∈ [0,1]
+  busyDurationUs             忙时长（DT 分支=前导+已解析数据帧时长）
+
+【本模块直接入参】
+  L2: cbraDtPreambleThreshDbm = -87
+  L2: cbraNoDtThreshDbm = -62
+  L3: measureWindowPowerSeq[]、measureDurationUs T_measure
+  L3: dtPreambleDetected、parsedFrameDurationUs（DT 分支必需）
+  引用 → 6.2.2 输出: 符号/帧时间粒度（窗口对齐，仅引用）
+
+────────────────────────────────────────
+6.5.5.6 PMS CSI
+建议 API: slbEstimatePmsCsi / slbSelectPmsCsiReportMode
+────────────────────────────────────────
+【本模块输出】
+  pmsIqLinear                12 bit 有符号 IQ[linear]
+  pmsRplDbm                  12 bit 有符号 RPL[dBm]
+  pmsIqDbm                   20·log10(|IQ|/1024) + RPL（上报编码）
+
+【本模块直接入参】
+  L1/L2: pmsCsiReportMode ∈ {1,2}（全帧平均 / 第 n 跳频符号）
+  L3: freqDomainIqSamples[]、subcarrierCount N_sc、rangingSymbolIndex n（模式2）
+  引用 → 6.2.3.9 输出: pmsMappedRe / 测距资源（仅引用测量对象）
+
+────────────────────────────────────────
+6.5.5.7 PMS 时间差
+建议 API: slbCalculatePmsTimeDiff
+────────────────────────────────────────
+【本模块输出】
+  pmsTimeDiffT               两信号：角色相关的 T
+  pmsTimeDiffT1 / T2         三信号：T1,T2
+
+【本模块直接入参】
+  L3: timestamps t1..t6、signalCount∈{2,3}、nodeRole（第一/第二节点）
+  引用 → 6.6：消费本输出做 RTT（本模块不输出距离米值）
+
+────────────────────────────────────────
+6.5.5.8 PMS AoA
+建议 API: slbEstimatePmsAoa
+────────────────────────────────────────
+【本模块输出】
+  aoaAzimuthDeg              水平角 [0,360)°（相对 X=正南，逆时针）
+  aoaElevationDeg            垂直角 [0,180]°（相对 Z=法线）
+
+【本模块直接入参】
+  L3: arraySnapshot（阵列快照）
+  L0/约定: 坐标系 Z=椭球法线，X=正南，Y=正东
+  引用 → 6.6：消费角度做定位融合

@@ -1,0 +1,134 @@
+# 6.6.4 定位信息解算 — 模块实现参数清单（详尽 I/O）
+# 六路径: SA / SD / MA / MD / MR / MT
+# airMode=slb；嵌套：只引用上游测量输出，不展开其入参
+# 建议 API: slbPosFixComputeTag（及路径选择/输入齐套校验）
+
+════════════════════════════════════════
+公共：解算节点闭合
+════════════════════════════════════════
+
+【本模块输出（所有路径共用）】
+  SlbPosFixResult
+    tagPhyId
+    frameType                ABS | REL（必须与 6.6.1 配置一致）
+    tagXyzM[3]               标签三维坐标（米；ABS=经纬高约定实现 / REL=偏移）
+    fixPathId                SA|SD|MA|MD|MR|MT
+    qualityOptional          可选质量/残差（实现）
+
+【本模块输入 — 直接（公共）】
+  L1: SlbPosContext
+    fixNodePhyId             本节点须为解算节点
+    frameType
+    nodes[].anchorXyzM[3]    锚点已知坐标表（解算前必须已知）
+    hasAnchorCoord == true（参与解算的锚点）
+  L3: aggregatedMeasSet[]    已汇聚测量 IE（来自 6.6.1 汇聚或本节点直收）
+  L2: minAnchorCountN        多锚建议 N≥2（实现可配）
+
+【本模块输入 — 他模块输出（按路径选用，见下）】
+  引用 → 6.6.1 输出: SlbPosContext / aggregatedMeasSet
+  引用 → 6.6.2.* 输出: distanceM / distanceMatrixM / tdoaInputSet
+  引用 → 6.6.3.* 输出: aoaMeasSet / aodMeasSet
+  引用 → 6.5.5.7 输出: toaUs（MT 路径经 FLAG/采集写入集）
+
+【强制总则】
+  标准无几何闭合公式附录 → 算法实现自定，但输入组合强制
+  单锚路径缺角度或距离 → 不得伪造成功坐标（ERR_INCOMPLETE）
+  ABS/REL 禁止与配置混用
+  本模块不发 PMS、不算 Ta..Td 原始时刻（只消费已解距离/角度/TOA）
+
+════════════════════════════════════════
+路径 SA — 单锚 AoA + 距离（6.6.4.1.1）
+════════════════════════════════════════
+【强制输入组合】锚点侧 AoA 且 锚点--标签距离 D
+
+【输入】
+  引用 → 6.6.3.1 输出: aoaAzimuthDeg, aoaElevationDeg + anchorPhyId
+  引用 → 6.6.2 输出: distanceM（RTT 或跳频或 FLAG 点对点）
+  直接: anchorXyzM[3]（该锚点）
+
+【输出】
+  tagXyzM[3], fixPathId=SA
+
+【数据流】
+  SA1 角度 → SA2 距离 → SA3 汇聚齐套校验 → SA4 闭合
+
+════════════════════════════════════════
+路径 SD — 单锚 AoD + 距离（6.6.4.1.2）
+════════════════════════════════════════
+【强制输入组合】标签侧出发角（波束序号）且 距离 D
+
+【输入】
+  引用 → 6.6.3.2 输出: beamIndex + tagPhyId
+  L2/实现: beamIndexToNominalAngle（序号→名义角，标准未定）
+  引用 → 6.6.2 输出: distanceM
+  直接: anchorXyzM[3]
+
+【输出】
+  tagXyzM[3], fixPathId=SD
+
+════════════════════════════════════════
+路径 MA — 多锚仅 AoA（6.6.4.2.1）
+════════════════════════════════════════
+【强制输入】各锚点 AoA；不强制距离
+
+【输入】
+  引用 → 6.6.3.1 输出: aoaMeasSet[]（N≥2 建议）
+  直接: 各锚点 anchorXyzM[3]
+  可选增强: 引用 → 6.6.2 distanceM（非强制）
+
+【输出】
+  tagXyzM[3], fixPathId=MA
+
+════════════════════════════════════════
+路径 MD — 多锚仅 AoD（6.6.4.2.2）
+════════════════════════════════════════
+【强制输入】多出发角（波束序号集）；不强制距离
+
+【输入】
+  引用 → 6.6.3.2 输出: aodMeasSet[]（N≥2）
+  直接: 锚点坐标表 / 波束几何（实现）
+
+【输出】
+  tagXyzM[3], fixPathId=MD
+
+════════════════════════════════════════
+路径 MR — 多锚仅距离（多边定位，6.6.4.2.3）
+════════════════════════════════════════
+【强制输入】各锚点与标签的距离；不需要角度
+
+【输入】
+  引用 → 6.6.2 输出: distanceM_i 或 distanceMatrix 中锚-标签边
+  直接: 各锚点 anchorXyzM[3]
+  建议: N≥3（2D）/ N≥4（3D）由实现定义最小集
+
+【输出】
+  tagXyzM[3], fixPathId=MR
+
+════════════════════════════════════════
+路径 MT — 多锚时间 / TDOA（6.6.4.2.4）
+════════════════════════════════════════
+【强制输入】各锚点 TOA_i（相对本地参考）；通常来自 FLAG-DL 等
+
+【输入】
+  引用 → 6.6.2.2 输出: tdoaInputSet[]（或多锚 toaUs）
+  直接: 各锚点 anchorXyzM[3]
+  L0: speedOfLightMps
+  前置: 引用 → 6.6.1 syncReadyFlag（组内时间对齐）
+
+【输出】
+  tagXyzM[3], fixPathId=MT
+
+════════════════════════════════════════
+六路径对照（解算输入一览）
+════════════════════════════════════════
+  路径 | 谁发 PMS(典型)     | 关键测量        | 要距? | 解算输入
+  SA   | 标签发 / 锚点收    | AoA            | 要    | AoA+D+锚坐标
+  SD   | 锚点波束发 / 标签收| AoD(beamIndex) | 要    | AoD+D+锚坐标
+  MA   | 标签发 / 多锚收    | 多 AoA         | 否    | N×AoA+锚坐标
+  MD   | 多波束/多锚相关    | 多 AoD         | 否    | N×AoD+几何
+  MR   | 测距交互           | 多距离         | 是(仅)| N×D+锚坐标
+  MT   | FLAG/时间定位      | 多 TOA         | 否    | TOA集+锚坐标+同步
+
+【错误码（与接口暴露一致）】
+  SLB_POS_OK / ERR_PARAM / ERR_CAP / ERR_TIMING /
+  ERR_GROUP / ERR_INCOMPLETE / ERR_NOT_READY

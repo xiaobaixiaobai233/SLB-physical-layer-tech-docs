@@ -1,0 +1,236 @@
+% !TEX program = xelatex
+\documentclass[10pt,a4paper]{ctexart}
+
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{enumitem}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{xurl}
+\usepackage{hyperref}
+
+\geometry{left=1.8cm,right=1.8cm,top=2.2cm,bottom=2.2cm}
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue}
+
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\urlstyle{tt}
+\newcommand{\eng}[1]{\begingroup\footnotesize\path{#1}\endgroup}
+% 节号 + 中文名，提高可读性
+\newcommand{\modref}[2]{\textit{#1~#2}}
+
+\title{%
+  \textbf{星闪 SLB 物理层}\\[0.3em]
+  \Large 6.6 模块实现参数汇总（详尽输入/输出）\\[0.2em]
+  \large 角色配置 \textbullet\ RTT/FLAG/跳频 \textbullet\ AoA/AoD \textbullet\ 六路径解算
+}
+\author{依据 6.6 分册与接口暴露文档；airMode\,=\,\texttt{slb}\\
+\small 每模块写明输出 / 直接输入 / 他模块输出引用（不展开上游入参）\\
+\small 他模块一律写作``节号~名称''，避免只写裸节号
+}
+\date{2026 年 7 月 28 日}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+\section{约定}
+\textbf{输出}：本模块对外可引用量。\\
+\textbf{直接输入}：L0/L1/L2/L3 本侧入参。\\
+\textbf{他模块}：写作「节号~中文名」（必要时再跟输出工程名），例如
+\modref{6.6.1}{角色与汇聚}、\modref{6.2.3.9}{PMS波形}。
+
+%----------------------------------------------------------------------
+\part{6.6.1 角色与汇聚}
+%----------------------------------------------------------------------
+
+\section{6.6.1 角色配置与测量汇聚}
+\textbf{API}：\eng{slbPosCreateContext}/\eng{slbPosApplyXrcConfig}/\eng{slbPosApplyGciResource}/\eng{slbPosValidateConfig}
+
+\begin{longtable}{L{3.2cm}L{12cm}}
+\caption{6.6.1 角色与汇聚 I/O}\label{t661} \\
+\toprule\textbf{角色}&\textbf{内容}\\\midrule
+\endfirsthead
+\toprule\textbf{角色}&\textbf{内容}\\\midrule
+\endhead\bottomrule\endfoot
+输出 &
+\eng{SlbPosContext}（\eng{localPhyId}、能力、\eng{nodes[]} 角色/锚点坐标、\eng{frameType} ABS/REL、\eng{fixNodePhyId}、可选测量位图、静态 PMS、上报目标、组播）；
+\eng{aggregatedMeasSet[]}；\eng{syncReadyFlag}；\eng{configValid} \\
+直接输入 &
+第7章已解析 XRC/能力（禁 raw ASN.1）；
+GCI 格式0--2 解码；SAB 同步完成；对端测量 IE \\
+他模块 &
+\modref{第7章}{XRC/能力IE}（解析字段）；
+\modref{6.2.4.6.6}{GCI位置测量资源指示}（格式0--2）；
+\modref{6.2.3}{物理层信号}/SAB（同步完成指示） \\
+\end{longtable}
+
+%----------------------------------------------------------------------
+\part{6.6.2 测距}
+%----------------------------------------------------------------------
+
+\section{6.6.2.1 RTT 点对点测距}
+\textbf{API}：\eng{slbPosBuildRttAirPlan}/\eng{slbPosOnToaTodSample}/\eng{slbCalculateRttDistance}
+
+\begin{longtable}{L{3.2cm}L{12cm}}
+\caption{RTT I/O}\label{t6621} \\
+\toprule\textbf{角色}&\textbf{内容}\\\midrule
+\endfirsthead
+\toprule\textbf{角色}&\textbf{内容}\\\midrule
+\endhead\bottomrule\endfoot
+输出 &
+\eng{rttAirCommands[]}；
+\eng{taUs}..\eng{tdUs}；
+\eng{distanceM}；
+时间差报告 IE \\
+直接输入 &
+\eng{rttMode} 两/三信号；
+$t_1{\ldots}t_6$（Us）；
+\eng{speedOfLightMps} \\
+他模块 &
+\modref{6.6.1}{角色与汇聚}（上下文/资源）；
+\modref{6.2.3.9}{PMS波形}；
+\modref{6.5.5.7}{PMS时间差TOA/TOD}；
+\modref{6.2.4.6.6}{GCI位置测量资源指示}（格式1--3） \\
+公式 &
+两信号 $D=(T_a-T_b)C/2$；
+三信号 $D=(T_a T_d-T_b T_c)/(T_a+T_b+T_c+T_d)\,C$ \\
+\end{longtable}
+
+\section{6.6.2.2 FLAG 快速定位}
+\textbf{API}：\eng{slbPosSetupMeasGroup}/\eng{slbPosOnGciFormat4}/\eng{slbPosBuildFlagAirPlan}/\eng{slbPosCollectToaSet}
+
+\begin{longtable}{L{3.2cm}L{12cm}}
+\caption{FLAG I/O}\label{t6622} \\
+\toprule\textbf{角色}&\textbf{内容}\\\midrule
+\endfirsthead
+\toprule\textbf{角色}&\textbf{内容}\\\midrule
+\endhead\bottomrule\endfoot
+输出 &
+组上下文（组ID、PhyID序、模式 M2M/DL/SUL/AUL、信号形态、报告方向、PMS $u$、间隔）；
+\eng{allowTxPms}；
+\eng{flagAirCommands[]}；
+\eng{distanceMatrixM} 或 \eng{tdoaInputSet[]} \\
+直接输入 &
+建组/参数消息；GCI 第四格式（激活+报告调度）；同步完成；多锚 TOA \\
+他模块 &
+\modref{6.6.1}{角色与汇聚}；
+\modref{6.2.4.6.6}{GCI位置测量资源指示}（第四格式激活）；
+\modref{6.2.3.9}{PMS波形}；
+\modref{6.5.5.7}{PMS时间差TOA/TOD}；
+可复用 \modref{6.6.2.1}{RTT测距} 的 \eng{distanceM} \\
+开测 &
+建组$\wedge$参数$\wedge$同步$\wedge$GCI-4 激活=1（F1/F2$\neq$开测） \\
+\end{longtable}
+
+\section{6.6.2.3 跳频复合测距 + 附录 L}
+\textbf{API}：\eng{slbPosApplyHopConfig}/\eng{slbCalculateCompositeCsi}/\eng{slbResolveHopRangingDistance}
+
+\begin{longtable}{L{3.2cm}L{12cm}}
+\caption{跳频复合 I/O}\label{t6623} \\
+\toprule\textbf{角色}&\textbf{内容}\\\midrule
+\endfirsthead
+\toprule\textbf{角色}&\textbf{内容}\\\midrule
+\endhead\bottomrule\endfoot
+输出 &
+\eng{hopContext}（图案、$T_{\mathrm{RF}}$、CSI 模式、$P$、LBT、跳索引）；
+\eng{compositeCsiH2w[]}；
+拼接 CSI；
+\eng{distanceM} \\
+直接输入 &
+配置 a)--l)；各跳双边 CSI IQ；\eng{freqHzPerHop[]}；CFO/SCO 补偿开关 \\
+他模块 &
+\modref{6.6.1}{角色与汇聚}；
+\modref{6.2.3.9}{PMS波形}；
+\modref{6.5.5.6}{PMS-CSI测量}；
+\modref{8.3}{信道中心频率}；
+附录 L（双向复合信道计算） \\
+复合 &
+$H^{2W}=H^{R}\times H^{I}$；相位仅余距离项（附录 L） \\
+开测 &
+配置齐套+跳频定时（\textbf{不}依赖 GCI-4） \\
+\end{longtable}
+
+%----------------------------------------------------------------------
+\part{6.6.3 测角}
+%----------------------------------------------------------------------
+
+\section{6.6.3.1 AoA 与 6.6.3.2 AoD}
+
+\begin{longtable}{L{1.8cm}L{4.8cm}L{8.6cm}}
+\caption{角度测量 I/O}\label{t663} \\
+\toprule\textbf{子节}&\textbf{输出}&\textbf{输入/他模块}\\\midrule
+\endfirsthead
+\toprule\textbf{子节}&\textbf{输出}&\textbf{输入/他模块}\\\midrule
+\endhead\bottomrule\endfoot
+AoA\newline(6.6.3.1) &
+\eng{aoaAzimuthDeg}/\eng{aoaElevationDeg}；
+\eng{aoaMeasSet[]} &
+能力 \eng{aoA-Estimation}；\\
+\modref{6.6.1}{角色与汇聚}；\\
+\modref{6.2.3.9}{PMS波形}；\\
+\modref{6.5.5.8}{AoA角度测量量} \\
+AoD\newline(6.6.3.2) &
+\eng{beamIndex}（$0{\ldots}N_{\mathrm{beam}}{-}1$）；
+\eng{aodMeasSet[]} &
+能力 \eng{aoD-Estimation}；波束表；\\
+\modref{6.6.1}{角色与汇聚}；\\
+\modref{6.2.3.9}{PMS波形}（须基于波束） \\
+\end{longtable}
+
+%----------------------------------------------------------------------
+\part{6.6.4 解算}
+%----------------------------------------------------------------------
+
+\section{6.6.4 定位信息解算（六路径）}
+
+\textbf{公共输出}：\eng{SlbPosFixResult}（\eng{tagXyzM[3]}、\eng{frameType}、\eng{fixPathId}）。
+
+\begin{longtable}{L{1.4cm}L{3.6cm}L{1.6cm}L{8.6cm}}
+\caption{六路径输入组合}\label{t664} \\
+\toprule\textbf{路径}&\textbf{强制测量}&\textbf{要距?}&\textbf{输入来源（引用他模块输出）}\\\midrule
+\endfirsthead
+\toprule\textbf{路径}&\textbf{强制测量}&\textbf{要距?}&\textbf{输入来源（引用他模块输出）}\\\midrule
+\endhead\bottomrule\endfoot
+SA & AoA & 要 &
+\modref{6.6.3.1}{AoA到达角}
++\modref{6.6.2}{距离测量}\eng{distanceM}
++锚坐标 \\
+SD & AoD(\eng{beamIndex}) & 要 &
+\modref{6.6.3.2}{AoD出发角}
++\modref{6.6.2}{距离测量}
++锚坐标 \\
+MA & $N\times$AoA & 否 &
+\modref{6.6.3.1}{AoA到达角} 测量集
++锚坐标 \\
+MD & $N\times$AoD & 否 &
+\modref{6.6.3.2}{AoD出发角} 测量集
++波束几何 \\
+MR & $N\times D$ & 仅距 &
+\modref{6.6.2}{距离测量} 多距离
++锚坐标 \\
+MT & TOA 集 & 否 &
+\modref{6.6.2.2}{FLAG快速定位}\eng{tdoaInputSet}
++锚坐标
++\modref{6.6.1}{角色与汇聚} 同步标志 \\
+\end{longtable}
+
+\textbf{强制}：单锚缺角或缺距 $\rightarrow$ \eng{ERR\_INCOMPLETE}；ABS/REL 与 \modref{6.6.1}{角色与汇聚} 配置一致。
+
+\section{嵌套总览}
+\begin{center}\small
+第7章 XRC/能力
+$\rightarrow$ \modref{6.6.1}{角色与汇聚}
+$\rightarrow$ \modref{6.6.2}{距离测量} / \modref{6.6.3}{角度测量}
+$\rightarrow$ \modref{6.6.1}{角色与汇聚}（汇聚）
+$\rightarrow$ \modref{6.6.4}{定位信息解算}\\[0.4em]
+测量原语：
+\modref{6.2.3.9}{PMS波形}；
+\modref{6.5.5.6}{PMS-CSI}；
+\modref{6.5.5.7}{TOA/TOD}；
+\modref{6.5.5.8}{AoA角度}
+\end{center}
+
+\end{document}

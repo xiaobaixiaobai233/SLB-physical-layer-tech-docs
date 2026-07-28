@@ -1,0 +1,241 @@
+% !TEX program = xelatex
+\documentclass[10pt,a4paper]{ctexart}
+
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{enumitem}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{xurl}
+\usepackage{hyperref}
+
+\geometry{left=1.8cm,right=1.8cm,top=2.2cm,bottom=2.2cm}
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue}
+
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\urlstyle{tt}
+\newcommand{\eng}[1]{\begingroup\footnotesize\path{#1}\endgroup}
+\newcommand{\tid}[1]{\begingroup\footnotesize\path{#1}\endgroup}
+\newcommand{\ideng}[2]{\tid{#1}\newline\eng{#2}}
+% 节号 + 中文名（可读性硬约束）
+\newcommand{\modref}[2]{\textit{#1~#2}}
+
+\title{%
+  \textbf{星闪 SLB 物理层}\\[0.3em]
+  \Large L3 跨模块运行时交换登记册\\[0.2em]
+  \large 生产者 / 消费者 \textbullet\ 嵌套只引输出 \textbullet\ 节号带中文名
+}
+\author{整合自 6.2 / 6.5 / 6.6 分册 L0--L3 与模块实现参数汇总\\
+airMode\,=\,\texttt{slb}（nearlink-naming）；流程见 skill \texttt{slb-param-registry}\\[0.2em]
+\small 动态当次量：不进 \texttt{SlbPhySessionConfig} 常驻区
+}
+\date{2026 年 7 月 28 日}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+\section{本册约定}
+
+\begin{itemize}[nosep]
+  \item \textbf{L3}：事件/测量/命令当次交换量；写方=生产者，读方=消费者。
+  \item \textbf{嵌套引用}：依赖他模块时只写其\textbf{输出}工程名，不展开其入参。
+  \item \textbf{可读引用}：凡写协议节号必须带中文名，形如 \modref{6.6.1}{角色与汇聚}，禁止裸写 \texttt{6.6.1}。
+  \item \textbf{排版}：长 \texttt{id} 与工程名上下叠排（\texttt{\textbackslash ideng}），防叠字。
+  \item 分册细表仍以各章 \texttt{*参数L0-L3四层整合.pdf} 为准；本册作\textbf{跨章合并索引}。
+\end{itemize}
+
+\section{与分册对照}
+
+\begin{longtable}{L{4.5cm}L{10.7cm}}
+\caption{分册真源路径}\label{tab:src} \\
+\toprule\textbf{分册}&\textbf{工作区路径}\\\midrule
+\endfirsthead
+\toprule\textbf{分册}&\textbf{工作区路径}\\\midrule
+\endhead\bottomrule\endfoot
+6.2 帧/信号/接入 & \path{6.2_120KHz基础子载波间隔系统/6.2参数L0-L3四层整合.pdf} \\
+6.5 通用功能 & \path{6.5物理层通用功能/6.5参数L0-L3四层整合.pdf} \\
+6.6 位置测量 & \path{6.6-位置测量流程/6.6参数L0-L3四层整合.pdf} \\
+模块 I/O 汇总 & 各章 \path{*模块实现参数汇总.pdf} \\
+\end{longtable}
+
+%======================================================================
+\part{6.2 侧交换}
+%======================================================================
+
+\section{时频索引与占用}
+
+\begin{longtable}{L{6.5cm}L{4.0cm}L{4.7cm}}
+\caption{L3：索引与占用}\label{tab:62-idx} \\
+\toprule\textbf{id / 工程名}&\textbf{生产者}&\textbf{消费者}\\\midrule
+\endfirsthead
+\toprule\textbf{id / 工程名}&\textbf{生产者}&\textbf{消费者}\\\midrule
+\endhead\bottomrule\endfoot
+\ideng{slb.rt.superframeNumber}{superframeNumber} & \modref{6.2.2.2}{无线帧和超帧} & 全 PHY \\
+\ideng{slb.rt.radioFrameIndex}{radioFrameIndex} & 定时 & \modref{6.2.3}{物理层信号}/\modref{6.5.3}{伪随机QPSK}/\modref{6.2.7}{3D-FISA} \\
+\ideng{slb.rt.symbolIndex}{symbolIndex} & 定时 & 映射/基带 \\
+\ideng{slb.rt.subcarrierIndex}{subcarrierIndex} & 映射 & RE/信号 \\
+\ideng{slb.rt.antennaPortIndex}{antennaPortIndex} & 调度 & 网格/\modref{6.2.9}{基带信号生成} \\
+\ideng{slb.rt.currentRadioFrameIndex}{currentRadioFrameIndex} & MAC/定时 & \modref{6.2.2.3}{COT与TTI}/\modref{6.2.7}{3D-FISA} \\
+\ideng{slb.rt.cotStartRadioFrameIndex}{cotStartRadioFrameIndex} & \modref{6.2.7}{3D-FISA}/\modref{6.2.2.3}{COT与TTI} & TTI/占用 \\
+\ideng{slb.rt.cotEndRadioFrameIndex}{cotEndRadioFrameIndex} & 同上 & \modref{6.2.8}{多域同步} \\
+\ideng{slb.rt.ttiIndexInCot}{ttiIndexInCot} & \modref{6.2.2.3}{COT与TTI} & 调度 \\
+\ideng{slb.rt.contendSuccess}{contendSuccess} & \modref{6.2.7}{3D-FISA} & \modref{6.2.9}{基带}/\modref{6.2.10}{上变频} 门控 \\
+\ideng{slb.rt.occupiedBaseCarrierSet}{occupiedBaseCarrierSet} & \modref{6.2.7}{3D-FISA} & \modref{6.2.10}{调制和上变频} \\
+\end{longtable}
+
+\section{RE / 波形}
+
+\begin{longtable}{L{6.5cm}L{4.0cm}L{4.7cm}}
+\caption{L3：RE 与波形}\label{tab:62-wave} \\
+\toprule\textbf{id / 工程名}&\textbf{生产者}&\textbf{消费者}\\\midrule
+\endfirsthead
+\toprule\textbf{id / 工程名}&\textbf{生产者}&\textbf{消费者}\\\midrule
+\endhead\bottomrule\endfoot
+\ideng{slb.rt.aKlComplex}{aKlComplex} & 6.2.3/4/5 信号·控制·数据 & \modref{6.2.9}{基带信号生成} \\
+\ideng{slb.rt.reIndexKl}{reIndexKl} & 映射方 & \modref{6.2.2.6}{资源网格} \\
+\ideng{slb.rt.rsQpskSequence}{rsQpskSequence} & \modref{6.5.3}{伪随机QPSK} & \modref{6.2.3}{物理层信号} 参考映射 \\
+\ideng{slb.rt.ftsMappedRe}{ftsMappedRe} & \modref{6.2.3.1}{FTS/STS} & \modref{6.2.7}{3D-FISA}/\modref{6.2.8}{多域同步} \\
+\ideng{slb.rt.stsMappedRe}{stsMappedRe} & \modref{6.2.3.1}{FTS/STS} & 盲检 \\
+\ideng{slb.rt.basebandSymbolSlp}{basebandSymbolSlp} & \modref{6.2.9}{基带信号生成} & \modref{6.2.10}{调制和上变频} \\
+\ideng{slb.rt.rfSignalSrf}{rfSignalSrf} & \modref{6.2.10}{调制和上变频} & RF/第8章 \\
+\ideng{slb.rt.symbolStartTimeUs}{symbolStartTimeUs} & \modref{6.2.9}{基带信号生成} & 拼接/测试 \\
+\end{longtable}
+
+\section{接入 / 同步事件}
+
+\begin{longtable}{L{6.5cm}L{4.0cm}L{4.7cm}}
+\caption{L3：3D-FISA 与多域同步}\label{tab:62-fisa} \\
+\toprule\textbf{id / 工程名}&\textbf{生产者}&\textbf{消费者}\\\midrule
+\endfirsthead
+\toprule\textbf{id / 工程名}&\textbf{生产者}&\textbf{消费者}\\\midrule
+\endhead\bottomrule\endfoot
+\ideng{slb.rt.hasTrafficOrSignalingDemand}{hasTrafficOrSignalingDemand} & 高层 & \modref{6.2.7}{3D-FISA} \\
+\ideng{slb.rt.tBlindDetectResult}{tBlindDetectResult} & \modref{6.2.7}{3D-FISA}(T) & MAC \\
+\ideng{slb.rt.matchedBaseCarrierIndex}{matchedBaseCarrierIndex} & \modref{6.2.7}{3D-FISA} & 跟随调度 \\
+\ideng{slb.rt.syncId}{syncId} & \modref{6.2.8}{多域同步} & SAB/选源 \\
+\ideng{slb.rt.syncSourceGNodeId}{syncSourceGNodeId} & \modref{6.2.8}{多域同步} & 本域调整 \\
+\ideng{slb.rt.neighborFtsStrength}{neighborFtsStrength} & 接收机 & \modref{6.2.8}{多域同步} \\
+\ideng{slb.rt.neighborSyncIdSet}{neighborSyncIdSet} & \modref{6.2.8}{多域同步} & 选源 \\
+\ideng{slb.rt.xrcReconfigTimingJump}{xrcReconfigTimingJump} & \modref{6.2.4}{物理层控制信息}/上层 & \modref{6.2.8}{多域同步} 方式2 \\
+\end{longtable}
+
+%======================================================================
+\part{6.5 侧交换}
+%======================================================================
+
+\section{序列 / 校验 / 调制}
+
+\begin{longtable}{L{6.5cm}L{4.0cm}L{4.7cm}}
+\caption{L3：共性算法}\label{tab:65-alg} \\
+\toprule\textbf{id / 工程名}&\textbf{生产者}&\textbf{消费者}\\\midrule
+\endfirsthead
+\toprule\textbf{id / 工程名}&\textbf{生产者}&\textbf{消费者}\\\midrule
+\endhead\bottomrule\endfoot
+\ideng{slb.rt.crcEncodedBits}{crcEncodedBits} & \modref{6.5.1}{CRC} & \modref{6.2.6}{信道编码} \\
+\ideng{slb.rt.crcPass}{crcPass} & \modref{6.5.1}{CRC} & MAC/HARQ \\
+\ideng{slb.rt.cInit}{cInit} & 各业务公式 & \modref{6.5.2}{Gold序列} \\
+\ideng{slb.rt.goldBits}{goldBits} & \modref{6.5.2}{Gold序列} & \modref{6.5.3}{伪随机QPSK}/\modref{6.5.7}{比特加扰}/\modref{6.5.9.1}{ZC组跳} \\
+\ideng{slb.rt.rsQpskSequence}{rsQpskSequence} & \modref{6.5.3}{伪随机QPSK} & \modref{6.2.3}{物理层信号} \\
+\ideng{slb.rt.scrambledBits}{scrambledBits} & \modref{6.5.7}{比特加扰} & \modref{6.5.6}{调制} \\
+\ideng{slb.rt.modulatedSymbols}{modulatedSymbols} & \modref{6.5.6}{调制} & \modref{6.2.3}{物理层信号}/\modref{6.5.8}{SC-FDMA} \\
+\ideng{slb.rt.scFdmaSymbols}{scFdmaSymbols} & \modref{6.5.8}{SC-FDMA} & 映射 \\
+\ideng{slb.rt.zcCyclicShifted}{zcCyclicShifted} & \modref{6.5.9}{ZC序列} & 6.3.3 DMRS \\
+\end{longtable}
+
+\section{功控 / 测量}
+
+\begin{longtable}{L{6.5cm}L{4.0cm}L{4.7cm}}
+\caption{L3：功控与测量量}\label{tab:65-pwr} \\
+\toprule\textbf{id / 工程名}&\textbf{生产者}&\textbf{消费者}\\\midrule
+\endfirsthead
+\toprule\textbf{id / 工程名}&\textbf{生产者}&\textbf{消费者}\\\midrule
+\endhead\bottomrule\endfoot
+\ideng{slb.rt.rsrpDbm}{rsrpDbm} & \modref{6.5.5.1}{RSRP} & \modref{6.5.4}{功率控制}/$P_L$ \\
+\ideng{slb.rt.rssiDbm}{rssiDbm} & \modref{6.5.5.2}{RSSI} & RSRQ/SINR \\
+\ideng{slb.rt.pathlossDb}{pathlossDb} & \modref{6.5.4}{功率控制} & 单业务 $P$ \\
+\ideng{slb.rt.txPowerTotalDbm}{txPowerTotalDbm} & \modref{6.5.4}{功率控制} & 发射缩放 \\
+\ideng{slb.rt.txPowerPerScLin}{txPowerPerScLin} & \modref{6.5.4}{功率控制} & $a_{k,l}$ 幅度 \\
+\ideng{slb.rt.cbra}{cbra} & \modref{6.5.5.5}{CBRA} & LBT/竞争 \\
+\ideng{slb.rt.pmsIqLinear}{pmsIqLinear} & \modref{6.5.5.6}{PMS-CSI} & \modref{6.6}{位置测量流程} \\
+\ideng{slb.rt.pmsTimeDiffT}{pmsTimeDiffT} & \modref{6.5.5.7}{PMS时间差} & \modref{6.6}{位置测量流程} \\
+\ideng{slb.rt.aoaAzimuthDeg}{aoaAzimuthDeg} & \modref{6.5.5.8}{AoA角度} & \modref{6.6}{位置测量流程} \\
+\end{longtable}
+
+%======================================================================
+\part{6.6 侧交换}
+%======================================================================
+
+\section{定位上下文与资源指示}
+
+\begin{longtable}{L{6.5cm}L{4.0cm}L{4.7cm}}
+\caption{L3：定位上下文}\label{tab:66-ctx} \\
+\toprule\textbf{id / 工程名}&\textbf{生产者}&\textbf{消费者}\\\midrule
+\endfirsthead
+\toprule\textbf{id / 工程名}&\textbf{生产者}&\textbf{消费者}\\\midrule
+\endhead\bottomrule\endfoot
+\ideng{slb.rt.posContext}{SlbPosContext} & \modref{6.6.1}{角色与汇聚} & 全 6.6 \\
+\ideng{slb.rt.gciFormat0to2}{gciResource} & \modref{6.2.4.6.6}{GCI位置测量资源指示} & 6.6.1/2/3 \\
+\ideng{slb.rt.gciFormat4}{gciFormat4} & \modref{6.2.4.6.6}{GCI位置测量资源指示} & \modref{6.6.2.2}{FLAG快速定位} \\
+\ideng{slb.rt.sabSyncDone}{syncReadyFlag} & SAB/FTS 同步 & FLAG/MT \\
+\ideng{slb.rt.allowTxPms}{allowTxPms} & \modref{6.6.2.2}{FLAG快速定位} & 空口 TX \\
+\ideng{slb.rt.aggregatedMeasSet}{aggregatedMeasSet} & \modref{6.6.1}{角色与汇聚} & \modref{6.6.4}{定位信息解算} \\
+\end{longtable}
+
+\section{测距 / 测角 / 解算}
+
+\begin{longtable}{L{6.5cm}L{4.0cm}L{4.7cm}}
+\caption{L3：测量与坐标}\label{tab:66-meas} \\
+\toprule\textbf{id / 工程名}&\textbf{生产者}&\textbf{消费者}\\\midrule
+\endfirsthead
+\toprule\textbf{id / 工程名}&\textbf{生产者}&\textbf{消费者}\\\midrule
+\endhead\bottomrule\endfoot
+\ideng{slb.rt.t1toT6Us}{t1Us..t6Us} & \modref{6.5.5.7}{PMS时间差} & 算 $T_a$--$T_d$ \\
+\ideng{slb.rt.taTbTcTdUs}{taUs..} & \modref{6.6.2.1}{RTT测距} & 距离/报告 \\
+\ideng{slb.rt.distanceM}{distanceM} & \modref{6.6.2}{距离测量} & \modref{6.6.4}{定位信息解算} SA/SD/MR \\
+\ideng{slb.rt.distanceMatrixM}{distanceMatrixM} & \modref{6.6.2.2}{FLAG快速定位} & \modref{6.6.4}{定位信息解算} \\
+\ideng{slb.rt.tdoaInputSet}{tdoaInputSet} & \modref{6.6.2.2}{FLAG快速定位} & \modref{6.6.4}{定位信息解算} MT \\
+\ideng{slb.rt.compositeCsiH2w}{compositeCsiH2w} & \modref{6.6.2.3}{跳频复合} & 解距 \\
+\ideng{slb.rt.aoaMeasSet}{aoaMeasSet} & \modref{6.6.3.1}{AoA到达角} & \modref{6.6.4}{定位信息解算} SA/MA \\
+\ideng{slb.rt.aodMeasSet}{aodMeasSet} & \modref{6.6.3.2}{AoD出发角} & \modref{6.6.4}{定位信息解算} SD/MD \\
+\ideng{slb.rt.beamIndex}{beamIndex} & \modref{6.6.3.2}{AoD出发角} & 解算/报告 \\
+\ideng{slb.rt.tagXyzM}{tagXyzM} & \modref{6.6.4}{定位信息解算} & 应用/MAC \\
+\end{longtable}
+
+%======================================================================
+\part{跨章边界（只引输出）}
+%======================================================================
+
+\begin{longtable}{L{4.8cm}L{4.5cm}L{5.9cm}}
+\caption{跨章边界输出（嵌套规则）}\label{tab:b} \\
+\toprule\textbf{来源}&\textbf{输出}&\textbf{消费者}\\\midrule
+\endfirsthead
+\toprule\textbf{来源}&\textbf{输出}&\textbf{消费者}\\\midrule
+\endhead\bottomrule\endfoot
+\modref{6.5.3}{伪随机QPSK} & \eng{rsQpskSequence} & \modref{6.2.3}{物理层信号} \\
+\modref{6.5.4}{功率控制} & 功率已写入 $a_{k,l}$ & \modref{6.2.9}{基带信号生成} \\
+\modref{6.2.4}{物理层控制信息} & SAB/GCI/SyncID 等 & 6.2.3/7/8、6.6 \\
+\modref{6.2.5}{物理层数据} & \eng{dataFrameFirstSymbolIndex} & PAS \\
+\modref{8.3}{信道中心频率} & \eng{baseChannelCenterFreqHz} & 6.2.2.4/7/9/10、跳频 \\
+\modref{6.2.2.1}{波形和符号} & \eng{nCp} & \modref{6.5.3}{伪随机QPSK} \\
+\modref{6.2.2.2}{无线帧和超帧} & \eng{nSymFrame} & \modref{6.5.3}{伪随机QPSK} \\
+\modref{6.2.3.1}{FTS/STS} & 训练 RE 位置 & \modref{6.5.5.1}{RSRP} \\
+\modref{6.2.3.9}{PMS波形} & \eng{pmsMappedRe} & 6.5.5.6--8、6.6 \\
+\modref{6.5.5.6}{PMS-CSI} & IQ/RPL & \modref{6.6}{位置测量流程} \\
+\modref{6.5.5.7}{PMS时间差} & TOA/TOD & \modref{6.6.2}{距离测量} \\
+\modref{6.5.5.8}{AoA角度} & 水平/垂直角 & \modref{6.6.3.1}{AoA到达角} \\
+第7章 XRC/能力IE & 已解析字段 & \modref{6.6.1}{角色与汇聚} \\
+\end{longtable}
+
+\section{交付检查}
+\begin{itemize}[nosep]
+  \item 生产者/消费者均带节号中文名（或明确角色如 MAC/定时）；
+  \item 跨章只列输出，无上游入参展开；
+  \item 与分册 L3 表冲突时：\textbf{先改分册再回写本册}；
+  \item naming：airMode=slb；有量纲带单位后缀。
+\end{itemize}
+
+\end{document}

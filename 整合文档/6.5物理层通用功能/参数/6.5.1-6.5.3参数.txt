@@ -1,0 +1,90 @@
+# 6.5.1–6.5.3 共性基础算法 — 模块实现参数清单（补全）
+# airMode=slb；命名遵循 nearlink-naming
+# 规则：实现本模块所需参数全部列出；若依赖他模块算出的量，只写「他模块输出」，不展开他模块入参。
+
+────────────────────────────────────────
+6.5.1 循环冗余校验 CRC
+建议 API: slbCalculateCrc / slbValidateCrc（encode/check）
+────────────────────────────────────────
+【本模块输出】
+  crcEncodedBits[]           系统码 b[0..B-1]，B=A+L
+  crcPass                    校验通过标志 {0,1}
+  crcParityLengthL           校验位长 L ∈ {6,8,16,24}
+
+【本模块直接入参】
+  L2/调用: infoBits[] a[0..A-1]、infoBitCount A
+  L2/调用: crcPoly（枚举 SLB_CRC24A/24B/16/8/6）
+  L2/条件: phyIdMaskBits[24]（仅 L=24 可叠加；L≠24 必须为空）
+  调用方缓冲: outBitsCap（须 ≥ A+L）
+
+【多项式与典型用途（本模块常量表，属 L0 算法常量）】
+  SLB_CRC24A  L=24  第二类数据 TB
+  SLB_CRC24B  L=24  SAB、HARQ-ACK、GCI、极化分段
+  SLB_CRC16   L=16  CQI、SR
+  SLB_CRC8    L=8   第一类数据可选
+  SLB_CRC6    L=6   特殊短控制
+
+【他模块】
+  引用 → 6.2.4 输出: 已组装控制信息比特流（仅引用比特缓冲，不展开字段）
+  引用 → 6.2.5 输出: TB/码块信息比特（仅引用）
+  引用 → 6.2.6：消费本模块输出 crcEncodedBits[] 作为极化输入（本模块不展开编码）
+
+【不展开】
+  6.2.4/6.2.5 字段组装细节；Phy-ID 掩码比特语义由上层给出 mask
+
+────────────────────────────────────────
+6.5.2 伪随机 Gold 序列
+建议 API: slbGenerateGoldSequence
+────────────────────────────────────────
+【本模块输出】
+  goldBits[]                 c(0)..c(M_PN-1)
+  x1Lut[]                    （可选实现）x1 预计算只读表，非协议强制对外输出
+
+【本模块直接入参】
+  L3/调用: cInit（≤31 bit 有效，调用方已算好）
+  L3/调用: pnLength M_PN
+  调用方缓冲: goldBitsCap（须 ≥ M_PN）
+
+【本模块 L0 算法常量】
+  goldOffset1600             强制 1600 偏移（禁止省略）
+  x1InitFixed                x1(0)=1，x1(1..30)=0
+  lfsrPolyX1 / lfsrPolyX2    31 阶递推多项式
+
+【他模块】
+  —（纯引擎；cInit 由调用方按业务公式算好再传入）
+  消费者只引用本模块输出 goldBits[]：
+    6.5.3（M_PN=322）、6.5.7 加扰、6.5.9.1 组跳
+
+【典型 cInit 公式归属（不在本模块展开，只登记引用关系）】
+  引用 → 6.5.3 输出侧公式入口: cInitRsQpsk（由 n,l,N_ID,N_CP 算）
+  引用 → 6.5.7 输出侧公式入口: cInitScramble
+  引用 → 6.5.9.1 输出侧公式入口: cInitGroupHop = floor(nIdX/30)
+
+────────────────────────────────────────
+6.5.3 伪随机 QPSK 序列
+建议 API: slbCalculateRsCinit / slbGenerateRsQpsk / slbMapRsQpskToRe
+────────────────────────────────────────
+【本模块输出】
+  rsCinit                    c_init = 2^10·(15(n+1)+l+1)·(4N_ID+1) + 4N_ID + N_CP
+  rsQpskSequence[]           r_{n,l}(0..160)，单位能量 QPSK
+  aKlFromRs                  按 k 映射：k≠80 → r(k)；k=80 → 0
+
+【本模块直接入参】
+  运行时: radioFrameIndex n（0..7）
+  运行时: symbolIndex l（随符号类型）
+  L1: gNodeIdLow8 → N_ID（0..255）
+  引用 → 6.2.2.1 输出: nCp（0..3；一A/B→3；二→2；三→1；四→0）
+  引用 → 6.2.2.2 输出: nSymFrame（校验 l 合法范围）
+  引用 → 6.5.2 输出: goldBits[]（内部 M_PN=322；不展开 Gold 递推）
+  引用 → 6.2.2.4/7 输出: dcSubcarrierIndex=80、re 写入接口
+
+【本模块 L0 常量】
+  rsQpskSubcarrierCount      161
+  rsGoldLengthMpn            322
+  rsQpskScale                1/√2（无整体负号；禁止与 6.5.6.1 混用）
+
+【金标自检】
+  n=0,l=0,N_ID=5,N_CP=3 → c_init=344087；c(0..4)=0,1,1,1,0
+
+【不展开】
+  6.5.2 的 x1/x2 内部；6.2.3 各信号梳齿/符号位置（映射方只消费 rsQpskSequence）

@@ -1,0 +1,383 @@
+% !TEX program = xelatex
+\documentclass[10pt,a4paper]{ctexart}
+
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{enumitem}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{xurl}
+\usepackage{hyperref}
+
+\geometry{left=1.8cm,right=1.8cm,top=2.2cm,bottom=2.2cm}
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue}
+
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+% 等宽长串可在列宽内断行，避免叠字
+\urlstyle{tt}
+\newcommand{\eng}[1]{\begingroup\footnotesize\path{#1}\endgroup}
+\newcommand{\modref}[2]{\textit{#1~#2}}
+
+\title{%
+  \textbf{星闪 SLB 物理层}\\[0.3em]
+  \Large 6.2 模块实现参数汇总\\[0.2em]
+  \large 6.2.2 / 6.2.3 / 6.2.7--10 \textbullet\ 嵌套引用他模块输出
+}
+\author{依据分册技术文档与人工参数清单补全\\
+airMode\,=\,\texttt{slb}（nearlink-naming）\\
+\small 规则：实现本模块所需参数全部列出；依赖他模块时只写其\textbf{输出}，不展开其入参
+}
+\date{2026 年 7 月 28 日}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+\section{约定}
+
+\begin{itemize}[nosep]
+  \item \textbf{本模块输出}：本小节实现后对外可被引用的量；
+  \item \textbf{直接入参}：L0/L1/运行时，或本模块本地需要的量；
+  \item \textbf{引用他模块输出}：只写模块名 + 输出工程名，禁止把上游内部入参再抄一遍。
+\end{itemize}
+
+%----------------------------------------------------------------------
+\part{6.2.2 基础帧结构和物理资源}
+%----------------------------------------------------------------------
+
+\section{6.2.2.1 波形和符号}
+\textbf{建议 API}：\eng{slbSelectSymbolDesign} / \eng{slbCalculateNcp}
+
+\begin{longtable}{L{4.2cm}L{11cm}}
+\caption{6.2.2.1 参数}\label{tab:6221} \\
+\toprule \textbf{角色} & \textbf{工程名 / 说明} \\ \midrule
+\endfirsthead
+\toprule \textbf{角色} & \textbf{工程名 / 说明} \\ \midrule
+\endhead
+\bottomrule\endfoot
+输出 &
+\eng{symbolType}；
+\eng{generalCpLenTs}（18/18/39/64/128）；
+\eng{generalSymbLenTs}（274/274/295/320/384）；
+\eng{gap1LenTs}；
+\eng{boundarySymbLenTs}；
+\eng{hasBoundarySymbol}；
+\eng{ofdmUsefulLenTs}=256；
+\eng{nCp}（一A/B$\to$3；二$\to$2；三$\to$1；四$\to$0） \\
+直接入参 & L0：\eng{fsHz},\eng{tsSec},\eng{deltaFHz},\eng{ofdmUsefulLenTs}；L1：\eng{symbolType} \\
+他模块 & ---（帧结构根模块） \\
+\end{longtable}
+
+\section{6.2.2.2 无线帧和超帧}
+\textbf{建议 API}：\eng{slbCalculateSymbolsPerRadioFrame} / \eng{slbSelectBoundaryCpIndices} / \eng{slbAdvanceSuperframeNumber}
+
+\begin{longtable}{L{4.2cm}L{11cm}}
+\caption{6.2.2.2 参数}\label{tab:6222} \\
+\toprule \textbf{角色} & \textbf{工程名 / 说明} \\ \midrule
+\endfirsthead
+\toprule \textbf{角色} & \textbf{工程名 / 说明} \\ \midrule
+\endhead
+\bottomrule\endfoot
+输出 &
+\eng{superframeDurationUs}=1\,ms；
+\eng{superframeNumber}\#0..\#65535；
+\eng{radioFramesPerSuperframe}=8；
+\eng{nSymFrame}（14/14/13/12/10）；
+\eng{generalCpSymbolIndices[]}；
+\eng{boundaryCpSymbolIndices[]}；
+\eng{linkSymbolLayout[]} \\
+直接入参 & L0：\eng{tsSec}；L1：\eng{symbolType} \\
+他模块 & \modref{6.2.2.1}{波形和符号}：\eng{generalCpLenTs},\eng{boundarySymbLenTs},\eng{hasBoundarySymbol},\eng{nCp} \\
+\end{longtable}
+
+\section{6.2.2.3 COT 与 TTI}
+\textbf{建议 API}：\eng{slbCalculateTtiRadioFrameCount} / \eng{slbLocateCurrentTti} / \eng{slbApplyCotRadioFrameBounds} / \eng{slbValidateLinkSymbolLayout}
+
+\begin{longtable}{L{4.2cm}L{11cm}}
+\caption{6.2.2.3 参数}\label{tab:6223} \\
+\toprule \textbf{角色} & \textbf{工程名 / 说明} \\ \midrule
+\endfirsthead
+\toprule \textbf{角色} & \textbf{工程名 / 说明} \\ \midrule
+\endhead
+\bottomrule\endfoot
+输出 &
+\eng{nTti}；
+\eng{ttiRadioFrameCount}=$2^{N_{\mathrm{TTI}}}$；
+\eng{cotStartRadioFrameIndex}/\eng{cotEndRadioFrameIndex}；
+\eng{ttiIndexInCot}；
+\eng{currentTtiRadioFrames[]}；
+\eng{transmissionMode}；
+\eng{switchGapSymbolCount}=1；
+\eng{ttiMustEndWithSwitchGap}；
+\eng{gLinkMustLeadTti} \\
+直接入参 & L1：\eng{nTti},\eng{transmissionMode},COT 起止；运行时：\eng{currentRadioFrameIndex} \\
+他模块 &
+\modref{6.2.2.2}{无线帧和超帧}：\eng{radioFramesPerSuperframe},\eng{nSymFrame},\eng{linkSymbolLayout[]}；
+\modref{6.2.2.9}{G/T附链路}：\eng{gtaLinkSymbolType}；
+\modref{6.2.2.10}{直通链路}：\eng{passthroughRole}/\eng{dSymbolContext} \\
+\end{longtable}
+
+\section{6.2.2.4 信道和载波}
+\textbf{建议 API}：\eng{slbValidateNchLchPair} / \eng{slbCalculateWorkingSubcarrierGroupBound} / \eng{slbMapBaseSubcarrierGroupIndex}
+
+\begin{longtable}{L{4.2cm}L{11cm}}
+\caption{6.2.2.4 参数}\label{tab:6224} \\
+\toprule \textbf{角色} & \textbf{工程名 / 说明} \\ \midrule
+\endfirsthead
+\toprule \textbf{角色} & \textbf{工程名 / 说明} \\ \midrule
+\endhead
+\bottomrule\endfoot
+输出 &
+\eng{baseChannelBwMHz}=20；
+\eng{subcarrierCount}=161；
+\eng{dcSubcarrierIndex}=80；
+\eng{baseSubcarrierGroupCount}=16；
+\eng{nCh}/\eng{lCh}；
+\eng{workingScgMaxIndex}=$\lfloor 16 nCh/lCh\rfloor-1$；
+\eng{baseScGroupIndex}；
+\eng{guardSubcarrierPresent} \\
+直接入参 & L0：网格常量；L1：\eng{nCh},\eng{lCh}；运行时：$k$ \\
+他模块 & \modref{8.3}{信道中心频率}：\eng{baseChannelCenterFreqHz} \\
+\end{longtable}
+
+\section{6.2.2.5--6.2.2.7 天线端口 / 网格 / RE}
+
+\begin{longtable}{L{2.2cm}L{3.5cm}L{9.5cm}}
+\caption{6.2.2.5--7 参数}\label{tab:62257} \\
+\toprule \textbf{子节} & \textbf{输出} & \textbf{直接入参 / 他模块} \\ \midrule
+\endfirsthead
+\toprule \textbf{子节} & \textbf{输出} & \textbf{直接入参 / 他模块} \\ \midrule
+\endhead
+\bottomrule\endfoot
+6.2.2.5 &
+\eng{antennaPortIndex},\eng{sharePortCommDomain},\eng{sharePortPassthrough} &
+域类型；\modref{6.2.2.8}{通信域}/\modref{6.2.2.10}{直通链路} 输出 \\
+6.2.2.6 &
+\eng{resourceGridDims}=$161\times nSymFrame$ &
+\modref{6.2.2.2}{无线帧和超帧}\eng{nSymFrame}；\modref{6.2.2.4}{信道和载波}\eng{subcarrierCount}；\modref{6.2.2.5}{天线端口}$p$ \\
+6.2.2.7 &
+\eng{reIndexKl},\eng{aKlComplex},\eng{dcReForcedZero} &
+$k,l$；\modref{6.2.2.6}{资源网格}；\modref{6.2.2.4}{信道和载波}\eng{dcSubcarrierIndex} \\
+\end{longtable}
+
+\section{6.2.2.8--6.2.2.10 通信域 / 三链路 / 直通}
+
+\begin{longtable}{L{2.2cm}L{4cm}L{9cm}}
+\caption{6.2.2.8--10 参数}\label{tab:622810} \\
+\toprule \textbf{子节} & \textbf{输出} & \textbf{直接入参 / 他模块} \\ \midrule
+\endfirsthead
+\toprule \textbf{子节} & \textbf{输出} & \textbf{直接入参 / 他模块} \\ \midrule
+\endhead
+\bottomrule\endfoot
+6.2.2.8 &
+\eng{commDomainScope},\eng{isLocalGNodeDomain} &
+L1 \eng{gNodeId}；\modref{6.2.2.4}{信道和载波} 工作载波；\modref{6.2.2.2}{无线帧和超帧}\eng{linkSymbolLayout[]} \\
+6.2.2.9 &
+\eng{gtaLinkType},\eng{gtaLinkSymbolType},\eng{txRxRoleAllowed} &
+链路类型；\modref{6.2.2.8}{通信域}/\modref{6.2.2.3}{COT与TTI} 时分约束 \\
+6.2.2.10 &
+\eng{passthroughRole},\eng{dSymbolContext},\eng{passthroughCotBound} &
+竞争成败/角色；\modref{6.2.2.3}{COT与TTI} COT；\modref{6.2.2.2}{无线帧和超帧} 布局 \\
+\end{longtable}
+
+%----------------------------------------------------------------------
+\part{6.2.3 物理层信号}
+%----------------------------------------------------------------------
+
+\section{共性：伪随机 QPSK}
+
+凡 $a_{k,l}=r_{n,l}(k)$：只引用 \modref{6.5.3}{伪随机QPSK} 输出 \eng{rsQpskSequence}；
+$N_{\mathrm{CP}}$ 引用 \modref{6.2.2.1}{波形和符号}\eng{nCp}；$n,l$ 合法范围引用 \modref{6.2.2.2}{无线帧和超帧}\eng{nSymFrame}。
+\textbf{不}在 6.2.3 展开 Gold/$c_{\mathrm{init}}$。
+
+\section{6.2.3.1 FTS / STS}
+
+\begin{longtable}{L{4.2cm}L{11cm}}
+\caption{6.2.3.1 参数}\label{tab:6231} \\
+\toprule \textbf{角色} & \textbf{工程名 / 说明} \\ \midrule
+\endfirsthead
+\toprule \textbf{角色} & \textbf{工程名 / 说明} \\ \midrule
+\endhead
+\bottomrule\endfoot
+输出 &
+\eng{ftsSequence[]}/\eng{stsSequence[]}；
+\eng{ftsRootIndexU}$\in\{1,160,2,159\}$；
+\eng{stsRootIndexU}=1..16；
+\eng{ftsMappedRe}/\eng{stsMappedRe} \\
+直接入参 & L0：161/DC；L1：域类型、\eng{symbolType}、节点 ID 低 4 位 \\
+他模块 &
+\modref{6.2.2.1}{波形和符号} CP；\modref{6.2.2.7}{资源元素RE} RE 写入；\modref{6.2.2.2}{无线帧和超帧}\eng{nSymFrame}；
+\modref{6.2.4}{物理层控制信息}\eng{sabRabSymbolLayout} \\
+\end{longtable}
+
+\section{6.2.3.2--6.2.3.8 参考信号与 PAS}
+
+\begin{longtable}{L{2.0cm}L{3.8cm}L{9.4cm}}
+\caption{6.2.3.2--8 参数}\label{tab:62328} \\
+\toprule \textbf{子节} & \textbf{输出} & \textbf{直接入参 / 他模块} \\ \midrule
+\endfirsthead
+\toprule \textbf{子节} & \textbf{输出} & \textbf{直接入参 / 他模块} \\ \midrule
+\endhead
+\bottomrule\endfoot
+SRS &
+\eng{srsMappedRe},\eng{srsCombSubcarriers[]},\eng{srsAntennaPortP0} &
+L1 \eng{srsSetConf}；$n,l,p0$；\modref{6.5.3}{伪随机QPSK}/\modref{6.2.2.7}{资源元素RE}/\modref{6.2.2.9}{G/T附链路}/\modref{6.2.4}{物理层控制信息} \\
+CSI-RS &
+\eng{csiRsMappedRe},\eng{csiRsCombSubcarriers[]},\eng{csiRsStartSymbolIndex} &
+L1 \eng{csiRsSetConf}；\modref{6.5.3}{伪随机QPSK}/\modref{6.2.2.7}{资源元素RE}/\modref{6.2.2.9}{G/T附链路}；\modref{6.2.4}{物理层控制信息}\eng{hasSabInCarrier} \\
+G-DMRS-C &
+\eng{gDmrsCMappedRe},\eng{gDmrsCSymbolIndex}（\#6/\#0） &
+\modref{6.5.3}{伪随机QPSK}/\modref{6.2.2.7}{资源元素RE}/\modref{6.2.2.5}{天线端口}/\modref{6.2.4}{物理层控制信息} \\
+P-DMRS-C &
+\eng{pDmrsCMappedRe},\eng{pDmrsCSymbolIndex} &
+\modref{6.5.3}{伪随机QPSK}/\modref{6.2.2.7}{资源元素RE}/\modref{6.2.2.10}{直通链路}/\modref{6.2.4}{物理层控制信息} \\
+DMRS-D &
+\eng{dmrsDMappedRe},\eng{dmrsDSymbolCountN},\eng{dmrsDCombCount},\eng{dmrsDPortCount},\eng{dmrsDTimeGranularity} &
+L1 \eng{dmrsD*SetConf}/\eng{dmrsTimeGranularity}/$N_{\mathrm{port}}$；\modref{6.5.3}{伪随机QPSK}/\modref{6.2.2.7}{资源元素RE}/链路符号 \\
+T-DMRS-C &
+\eng{tDmrsCMappedRe},\eng{tDmrsCSymbolIndex} &
+L1 \eng{dedicatedAckResourceSetConf}；\modref{6.5.3}{伪随机QPSK}/\modref{6.2.2.7}{资源元素RE}/\modref{6.2.2.9}{G/T附链路}/\modref{6.2.4}{物理层控制信息} \\
+PAS &
+\eng{pasMappedRe},\eng{pasSubcarrierPair},\eng{pasAntennaPortP0} &
+\modref{6.5.3}{伪随机QPSK}/\modref{6.2.2.7}{资源元素RE}；\modref{6.2.5}{物理层数据}\eng{dataFrameFirstSymbolIndex} \\
+\end{longtable}
+
+\section{6.2.3.9--6.2.3.10 PMS / 感知}
+
+\begin{longtable}{L{2.0cm}L{4.2cm}L{9cm}}
+\caption{6.2.3.9--10 参数}\label{tab:623910} \\
+\toprule \textbf{子节} & \textbf{输出} & \textbf{直接入参 / 他模块} \\ \midrule
+\endfirsthead
+\toprule \textbf{子节} & \textbf{输出} & \textbf{直接入参 / 他模块} \\ \midrule
+\endhead
+\bottomrule\endfoot
+PMS &
+\eng{pmsSequence[]},\eng{pmsMappedRe},\eng{securePmsWaveform},\eng{pmsMultiCarrierConcat} &
+L1 $u\in[3,20]$/资源指示；安全 KDF；\modref{6.2.2.7}{资源元素RE}/\modref{6.2.2.4}{信道和载波}/\modref{8.3}{信道中心频率}/\modref{6.5.3}{伪随机QPSK} \\
+感知 &
+\eng{sensingRefMappedRe},\eng{secureSensingScrambled} &
+感知资源指示/$N_t$；复用 \modref{6.2.3.2/3/9}{SRS/CSI-RS/PMS} 输出；\modref{6.2.2.7}{资源元素RE} \\
+\end{longtable}
+
+%----------------------------------------------------------------------
+\part{6.2.7--6.2.10}
+%----------------------------------------------------------------------
+
+\section{6.2.7 3D-FISA}
+
+\begin{longtable}{L{4.2cm}L{11cm}}
+\caption{6.2.7 参数}\label{tab:627} \\
+\toprule \textbf{角色} & \textbf{工程名 / 说明} \\ \midrule
+\endfirsthead
+\toprule \textbf{角色} & \textbf{工程名 / 说明} \\ \midrule
+\endhead
+\bottomrule\endfoot
+输出 &
+\eng{contendSuccess}；
+\eng{occupiedBaseCarrierSet[]}；
+COT 起止；
+\eng{sabTxPeriod}/\eng{broadcastTxPeriod}；
+\eng{idleGranularity}；
+\eng{tBlindDetectResult}；
+\eng{tFollowWindowSabPeriod}；
+\eng{matchedBaseCarrierIndex}；
+\eng{connectedGNodeId} \\
+直接入参 &
+L1：\eng{sabPeriod},\eng{broadcastPeriod},\eng{contendCarrierBitmap},带宽/模式/链路布局；
+高层：\eng{hasTrafficOrSignalingDemand}；运行时：\eng{currentRadioFrameIndex} \\
+他模块 &
+\modref{6.2.2.2}{无线帧和超帧} 帧边界；
+\modref{6.2.2.3}{COT与TTI} COT/TTI 契约；
+\modref{6.2.2.4}{信道和载波} 载波；
+\modref{6.2.2.1}{波形和符号} 符号时长；
+\modref{8.3}{信道中心频率} 中心频；
+\modref{6.2.4}{物理层控制信息} SAB 字段；
+\modref{6.2.3.1}{FTS/STS} FTS/STS 映射（盲检对象） \\
+\end{longtable}
+
+\section{6.2.8 多域同步}
+
+\begin{longtable}{L{4.2cm}L{11cm}}
+\caption{6.2.8 参数}\label{tab:628} \\
+\toprule \textbf{角色} & \textbf{工程名 / 说明} \\ \midrule
+\endfirsthead
+\toprule \textbf{角色} & \textbf{工程名 / 说明} \\ \midrule
+\endhead
+\bottomrule\endfoot
+输出 &
+\eng{syncId}（32 bit）；
+\eng{syncCapabilityBits}；
+\eng{syncSourceGNodeId}；
+\eng{syncAdjustMode}；
+\eng{timingAdjustStepTs}（$\le 4T_s$）；
+\eng{freqOffsetAdjustStepPpm}（$\le 0.1$\,ppm）；
+\eng{interDomainTrackPeriodUs}=250；
+\eng{postCotTrackWindowCount}=4 \\
+直接入参 &
+L2/产品：\eng{thSync}；能力属性比特；邻域 FTS 强度与 SyncID；方式 2 XRC/SIB 跳变量 \\
+他模块 &
+\modref{6.2.4}{物理层控制信息} SyncID 承载；
+\modref{6.2.3.1}{FTS/STS} FTS；
+\modref{6.2.2.1}{波形和符号}\eng{tsSec}；
+\modref{6.2.7}{3D-FISA} COT 结束/空闲粒度 \\
+\end{longtable}
+
+\section{6.2.9 基带信号生成}
+
+\begin{longtable}{L{4.2cm}L{11cm}}
+\caption{6.2.9 参数}\label{tab:629} \\
+\toprule \textbf{角色} & \textbf{工程名 / 说明} \\ \midrule
+\endfirsthead
+\toprule \textbf{角色} & \textbf{工程名 / 说明} \\ \midrule
+\endhead
+\bottomrule\endfoot
+输出 &
+\eng{basebandSymbolSlp[]} $=s_l^{(p)}(t)$；
+\eng{symbolStartTimeUs}；
+\eng{ifftSize}=256 \\
+直接入参 & 运行时：$l,p$ \\
+他模块 &
+\modref{6.2.2.7}{资源元素RE}\eng{aKlComplex}；
+\modref{6.2.2.1}{波形和符号} $\Delta f$/CP/符号长；
+\modref{6.2.2.2}{无线帧和超帧} 边界符号判定；
+\modref{6.2.3.1}{FTS/STS} FTS CP 特例；
+\modref{6.5.4}{功率控制} 功率已在 $a$ 幅度；
+\modref{6.2.7}{3D-FISA} 占用态（空闲禁发） \\
+\end{longtable}
+
+\section{6.2.10 调制和上变频}
+
+\begin{longtable}{L{4.2cm}L{11cm}}
+\caption{6.2.10 参数}\label{tab:6210} \\
+\toprule \textbf{角色} & \textbf{工程名 / 说明} \\ \midrule
+\endfirsthead
+\toprule \textbf{角色} & \textbf{工程名 / 说明} \\ \midrule
+\endhead
+\bottomrule\endfoot
+输出 &
+\eng{rfSignalSrf[]}；
+\eng{mixerClockPhaseAligned} \\
+直接入参 & 运行时：$p$ \\
+他模块 &
+\modref{6.2.9}{基带信号生成}\eng{basebandSymbolSlp[]}；
+\modref{8.3}{信道中心频率}\eng{baseChannelCenterFreqHz}（$f_0$）；
+\modref{6.2.2.2}{无线帧和超帧} 帧起点 $t{=}0$；
+\modref{6.2.7}{3D-FISA}\eng{occupiedBaseCarrierSet[]} \\
+\end{longtable}
+
+\section{嵌套依赖示意}
+
+\begin{center}
+\small
+\begin{tabular}{c}
+6.2.2.1 符号设计 $\rightarrow$ 6.2.2.2 帧 $\rightarrow$ 6.2.2.3 COT/TTI / 6.2.2.6--7 网格/RE \\[0.3em]
+6.2.2.4 载波 $\rightarrow$ 6.2.2.8 通信域 $\rightarrow$ 6.2.2.9/10 链路 \\[0.3em]
+6.5.3 $r_{n,l}$ + 6.2.2.7 RE $\rightarrow$ 6.2.3.x 各信号映射 \\[0.3em]
+6.2.7 占用 $\rightarrow$ 6.2.9 基带 $\rightarrow$ 6.2.10 RF；（并行）6.2.8 选源/跟踪
+\end{tabular}
+\end{center}
+
+\end{document}
