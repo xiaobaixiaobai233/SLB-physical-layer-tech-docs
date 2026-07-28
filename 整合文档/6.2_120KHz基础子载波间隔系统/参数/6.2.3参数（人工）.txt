@@ -1,0 +1,189 @@
+# 6.2.3 物理层信号 — 模块实现参数清单（补全）
+# airMode=slb；命名遵循 nearlink-naming
+# 规则：实现本模块所需参数全部列出；若依赖他模块算出的量，只写「他模块输出」，不展开他模块入参。
+# 共性：多数 RS 写 a_{k,l}=r_{n,l}(k)（k≠80）；r_{n,l}(k) 统一引用 6.5.3 输出，不在本册展开 Gold/c_init。
+
+────────────────────────────────────────
+6.2.3.1 同步信号 FTS / STS
+建议 API: slbGenerateFtsSequence / slbMapFts / slbGenerateStsSequence / slbMapSts
+────────────────────────────────────────
+【本模块输出】
+  ftsSequence[]              d_FTS(k)，ZC 型；k=0..160，k=80→0
+  stsSequence[]              2√2 · d_STS(k)，梳状；仅 n≡0(mod 8) 且 n≠80
+  ftsRootIndexU              FTS 根标识 u ∈ {1,160,2,159}
+  stsRootIndexU              STS 根标识 u = 1..16（G-ID/先发节点 ID 低4位+1）
+  ftsMappedRe                FTS 映射：SAB/RAB #1,#2；首符号 CP 加倍、次符号无 CP
+  stsMappedRe                STS 映射：SAB/RAB #0（或无 SAB 时该帧 #0）
+
+【本模块直接入参】
+  L0: subcarrierCount(=161), dcSubcarrierIndex(=80)
+  L1/场景: domainType（通信域/直通/RAB）, symbolType（决定 FTS u=1 或 160）
+  L1: gNodeIdLow4 或 passthroughFirstNodeIdLow4（供 STS u）
+  引用 → 6.2.2.1 输出: symbolType, generalCpLenTs（FTS 首符号 2×CP）
+  引用 → 6.2.2.7 输出: reIndexKl / resourceGrid 写入接口（aKlComplex）
+  引用 → 6.2.2.2 输出: nSymFrame（符号号合法范围）
+  引用 → 6.2.4 输出: sabRabSymbolLayout（#0/#1/#2 布局，仅引用控制块输出）
+
+【不展开】
+  6.5.9 通用 ZC 框架参数（本节用闭式公式，不走 6.5.9）
+  6.2.4 字段比特语义
+
+────────────────────────────────────────
+6.2.3.2 信道探测信号 SRS
+建议 API: slbGenerateSrsSequence / slbMapSrs
+────────────────────────────────────────
+【本模块输出】
+  srsMappedRe                T 链路符号上 a_{k,l}=r_{n,l}(k)（梳齿映射后）
+  srsCombSubcarriers[]       梳齿子载波集合（来自 srs-Set-Conf）
+  srsAntennaPortP0           单/多端口时仅 p0 映射，其余端口 0
+
+【本模块直接入参】
+  L1: srsSetConf（高层 srs-Set-Conf：梳齿/资源/预配置激活）
+  运行时: radioFrameIndex n, symbolIndex l, antennaPortIndex p / p0
+  引用 → 6.5.3 输出: rsQpskSequence r_{n,l}(k)   ★不展开 c_init/N_ID/N_CP
+  引用 → 6.2.2.7 输出: reIndexKl / aKlComplex 写入
+  引用 → 6.2.2.9 输出: gtaLinkSymbolType（须为 T 符号）
+  引用 → 6.2.4 输出: srsPreconfigActivate（预配置激活指示，仅引用）
+
+────────────────────────────────────────
+6.2.3.3 信道状态信息参考信号 CSI-RS
+建议 API: slbGenerateCsiRsSequence / slbMapCsiRs
+────────────────────────────────────────
+【本模块输出】
+  csiRsMappedRe              G 链路符号上 a_{k,l}=r_{n,l}(k)
+  csiRsCombSubcarriers[]     梳齿子载波（csi-RS-Set-Conf）
+  csiRsStartSymbolIndex      初始符号：G-PCIB 后或 STS 后首符号（含 SAB 判定）
+  csiRsAntennaPortP0         仅 p0 映射
+
+【本模块直接入参】
+  L1: csiRsSetConf（高层 csi-RS-Set-Conf）
+  运行时: radioFrameIndex n, symbolIndex l, antennaPortIndex p0
+  引用 → 6.5.3 输出: rsQpskSequence r_{n,l}(k)
+  引用 → 6.2.2.7 输出: reIndexKl / aKlComplex
+  引用 → 6.2.2.9 输出: gtaLinkSymbolType（须为 G 符号）
+  引用 → 6.2.4 输出: hasSabInCarrier / gPcibEndSymbolIndex（初始符号判定）
+
+────────────────────────────────────────
+6.2.3.4 G 链路公共解调参考信号 G-DMRS-C
+建议 API: slbGenerateDmrsSequence(kind=gDmrsC) / slbMapDmrs
+────────────────────────────────────────
+【本模块输出】
+  gDmrsCMappedRe             a_{k,l}=r_{n,l}(k)
+  gDmrsCSymbolIndex          含 SAB：TTI 首帧 #6；无 SAB：#0
+
+【本模块直接入参】
+  运行时: radioFrameIndex n, symbolIndex l
+  引用 → 6.5.3 输出: rsQpskSequence r_{n,l}(k)
+  引用 → 6.2.2.7 输出: reIndexKl / aKlComplex
+  引用 → 6.2.2.5 输出: sharePortCommDomain（与 SAB/G-PCIB/广播同端口）
+  引用 → 6.2.4 输出: hasSabInCarrier（映射符号位置判定）
+
+────────────────────────────────────────
+6.2.3.5 直通链路公共解调参考信号 P-DMRS-C
+建议 API: slbGenerateDmrsSequence(kind=pDmrsC) / slbMapDmrs
+────────────────────────────────────────
+【本模块输出】
+  pDmrsCMappedRe             a_{k,l}=r_{n,l}(k)（D 符号）
+  pDmrsCSymbolIndex          含 SAB：TTI 首帧 #6
+
+【本模块直接入参】
+  运行时: radioFrameIndex n, symbolIndex l
+  引用 → 6.5.3 输出: rsQpskSequence r_{n,l}(k)
+  引用 → 6.2.2.7 输出: reIndexKl / aKlComplex
+  引用 → 6.2.2.10 输出: dSymbolContext / passthroughRole
+  引用 → 6.2.4 输出: hasSabInCarrier（可选，含 SAB 时 #6）
+
+────────────────────────────────────────
+6.2.3.6 数据信息解调参考信号 DMRS-D
+建议 API: slbGenerateDmrsSequence(kind=dmrsD) / slbMapDmrs
+────────────────────────────────────────
+【本模块输出】
+  dmrsDMappedRe              调度数据符号内连续 N 个符号上的 RE 映射
+  dmrsDSymbolCountN          N = N_port / N_comb
+  dmrsDCombCount             N_comb ∈ {1,2}
+  dmrsDPortCount             N_port（端口总数量）
+  dmrsDPortRangePerSymbol    第 M 符号端口区间 [M·N_comb, M·N_comb+N_comb)
+  dmrsDTimeGranularity       时域周期（默认 1 无线帧；跨 SAB 以含 SAB 载波为准）
+
+【本模块直接入参】
+  L1: dmrsDGlinkDataSetConf / dmrsDTLinkDataSetConf（含 N_comb）
+  L1: dmrsTimeGranularity
+  L1: portCount N_port, antennaPortP0（单/多端口）
+  运行时: radioFrameIndex n, symbolIndex l, dataSymbolSpan
+  引用 → 6.5.3 输出: rsQpskSequence r_{n,l}(k)
+  引用 → 6.2.2.7 输出: reIndexKl / aKlComplex
+  引用 → 6.2.2.9 输出: gtaLinkSymbolType（G/T/A）
+  引用 → 6.2.2.10 输出: dSymbolContext（直通数据）
+  引用 → 6.2.4 输出: hasSabInCarrier（跨载波时域起点）
+
+────────────────────────────────────────
+6.2.3.7 T 链路控制信息解调参考信号 T-DMRS-C
+建议 API: slbGenerateDmrsSequence(kind=tDmrsC) / slbMapDmrs
+────────────────────────────────────────
+【本模块输出】
+  tDmrsCMappedRe             与 TCI 同 RE/同梳齿；a_{k,l}=r_{n,l}(k)
+  tDmrsCSymbolIndex          TCI 首符号
+
+【本模块直接入参】
+  L1: dedicatedAckResourceSetConf（dedicatedACK-ResourceSetConf 指示）
+  运行时: radioFrameIndex n, symbolIndex l
+  引用 → 6.5.3 输出: rsQpskSequence r_{n,l}(k)
+  引用 → 6.2.2.7 输出: reIndexKl / aKlComplex
+  引用 → 6.2.2.9 输出: gtaLinkSymbolType（须为 T 符号）
+  引用 → 6.2.4 输出: tciResourceIndication（TCI 首符号/梳齿，仅引用）
+
+────────────────────────────────────────
+6.2.3.8 物理层数据信息相位调整信号 PAS
+建议 API: slbGeneratePasSequence / slbMapPas
+────────────────────────────────────────
+【本模块输出】
+  pasMappedRe                数据帧首符号上 k0,k1 两点；a=r_{n,l}(k)
+  pasSubcarrierPair          (k0, k1)
+  pasAntennaPortP0           端口 #0（单/多端口时仅 p0）
+
+【本模块直接入参】
+  运行时: radioFrameIndex n, symbolIndex l（数据帧首符号）, antennaPortP0
+  引用 → 6.5.3 输出: rsQpskSequence r_{n,l}(k)
+  引用 → 6.2.2.7 输出: reIndexKl / aKlComplex
+  引用 → 6.2.5 输出: dataFrameFirstSymbolIndex（数据帧首符号，仅引用）
+
+────────────────────────────────────────
+6.2.3.9 位置测量信号 PMS / 安全 PMS
+建议 API: slbGeneratePmsSequence / slbMapPms
+────────────────────────────────────────
+【本模块输出】
+  pmsSequence[]              d(n) ZC 型，u∈[3,20]
+  pmsMappedRe                资源指示调度符号上的 RE
+  securePmsWaveform          KDF 加扰后波形（安全 PMS）
+  pmsMultiCarrierConcat      多基础载波时域拼接结果
+
+【本模块直接入参】
+  L1: pmsRootIndexU（u∈[3,20]）, pmsResourceIndication
+  安全: rand / kdfKey / secureParam（安全层）
+  引用 → 6.2.2.7 输出: reIndexKl / aKlComplex
+  引用 → 6.2.2.4 输出: nCh（多载波拼接规模）
+  引用 → 8.3 输出: baseChannelCenterFreqHz（多载波 PMS 中心频率）
+  引用 → 6.5.2/6.5.3 输出: goldBits c(i) / rsQpsk（安全加扰路径，仅引用序列输出）
+
+────────────────────────────────────────
+6.2.3.10 感知参考 / 安全感知
+建议 API: slbMapSensingReference / slbApplySecureSensingScramble
+────────────────────────────────────────
+【本模块输出】
+  sensingRefMappedRe         复用 CSI-RS/SRS/PMS 的感知参考 RE
+  secureSensingScrambled     X_i^p = X_0^p · e^{j(ρ_i+φ_i^p)}（N_t≥2）
+
+【本模块直接入参】
+  L1: sensingResourceIndication, txAntennaCount Nt
+  安全: scramblePhaseRho / scramblePhasePhi（保密参数）
+  引用 → 6.2.3.2/3/9 输出: srsMappedRe / csiRsMappedRe / pmsMappedRe（复用，不展开其入参）
+  引用 → 6.2.2.7 输出: reIndexKl / aKlComplex
+
+────────────────────────────────────────
+【跨子模块共性引用：伪随机 QPSK】
+凡写 a_{k,l}=r_{n,l}(k) 的模块，统一：
+  引用 → 6.5.3 输出: rsQpskSequence
+  其中 6.5.3 内部需要的 n,l,N_ID,N_CP、以及 6.5.2 的 c(i)：
+    → 在 6.5.3 模块参数清单中展开，本 6.2.3 清单不重复。
+  N_CP 来源：引用 → 6.2.2.1 输出: nCp
+  n,l 来源：运行时无线帧号/符号号；合法范围引用 → 6.2.2.2 输出: nSymFrame
