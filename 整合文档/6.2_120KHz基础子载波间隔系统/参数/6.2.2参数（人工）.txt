@@ -1,0 +1,179 @@
+# 6.2.2 基础帧结构和物理资源 — 模块实现参数清单（补全）
+# airMode=slb；命名遵循 nearlink-naming
+# 规则：实现本模块所需参数全部列出；若依赖他模块算出的量，只写「他模块输出」，不展开他模块入参。
+
+────────────────────────────────────────
+6.2.2.1 波形和符号（CP-OFDM 符号设计）
+建议 API: slbSelectSymbolDesign / slbCalculateNcp
+────────────────────────────────────────
+【本模块输出】
+  symbolType                 符号类型（类型一A/一B/二/三/四）
+  generalCpLenTs             一般 CP 长度（Ts）：18/18/39/64/128
+  generalSymbLenTs           一般符号总长（Ts）：274/274/295/320/384
+  gap1LenTs                  GAP1 长度（Ts）：20/22/44/—/—
+  boundarySymbLenTs          边界符号总长（Ts）：276/278/300/—/—
+  hasBoundarySymbol          是否存在边界符号
+  ofdmUsefulLenTs            OFDM 有效体长度 = 256（常量，亦属 L0）
+  nCp                        供 6.5.3 的 N_CP：一A/B→3；二→2；三→1；四→0
+
+【本模块直接入参】
+  L0: fsHz, tsSec, deltaFHz, ofdmUsefulLenTs
+  L1: symbolType（上层下发会话配置）
+
+【不展开（他模块）】
+  —（本节为帧结构根模块，不依赖他模块输出）
+
+────────────────────────────────────────
+6.2.2.2 无线帧和超帧
+建议 API: slbCalculateSymbolsPerRadioFrame / slbSelectBoundaryCpIndices / slbAdvanceSuperframeNumber
+────────────────────────────────────────
+【本模块输出】
+  superframeDurationUs       超帧时长 = 1 ms（30720 Ts）
+  superframeNumber           超帧号 #0..#65535 循环
+  radioFramesPerSuperframe   每超帧无线帧数 = 8（#0..#7）
+  nSymFrame                  每无线帧符号数 N_sym^frame：14/14/13/12/10
+  generalCpSymbolIndices[]   一般 CP 符号索引 l 列表
+  boundaryCpSymbolIndices[]  边界 CP 符号索引 l 列表
+  linkSymbolLayout[]         本帧 G/T/A/D/switchGap 符号槽布局（与 6.2.2.9/10 衔接）
+
+【本模块直接入参】
+  L0: tsSec, superframeDurationUs（或由 30720*Ts 派生）
+  L1: symbolType
+  引用 → 6.2.2.1 输出: generalCpLenTs, boundarySymbLenTs, hasBoundarySymbol, nCp
+
+【不展开】
+  6.2.2.1 内部 L0（fsHz/deltaFHz 等）不再重复列出
+
+────────────────────────────────────────
+6.2.2.3 信道占用时间 COT 和传输时间间隔 TTI
+建议 API: slbCalculateTtiRadioFrameCount / slbLocateCurrentTti / slbApplyCotRadioFrameBounds / slbValidateLinkSymbolLayout
+────────────────────────────────────────
+【本模块输出】
+  nTti                       N_TTI ∈ {0..6}
+  ttiRadioFrameCount         TTI 无线帧数 = 2^N_TTI（1/2/4/8/16/32/64）
+  cotStartRadioFrameIndex    COT 起始无线帧
+  cotEndRadioFrameIndex      COT 结束无线帧
+  ttiIndexInCot              COT 内当前 TTI 序号
+  currentTtiRadioFrames[]    当前 TTI 覆盖的无线帧集合
+  transmissionMode           连续 / 非连续传输模式
+  switchGapSymbolCount       链路切换间隔 = 1 符号（强制）
+  ttiMustEndWithSwitchGap    TTI 末符号必须为切换间隔（约束标志）
+  gLinkMustLeadTti           通信域 TTI 须以 G 链路开头（约束标志）
+
+【本模块直接入参】
+  L1: nTti, transmissionMode, cotStartRadioFrameIndex, cotEndRadioFrameIndex
+  运行时: currentRadioFrameIndex（当前无线帧位置）
+  引用 → 6.2.2.2 输出: radioFramesPerSuperframe, nSymFrame, linkSymbolLayout[]
+  引用 → 6.2.2.9 输出: gtaLinkSymbolType（G/T/A 符号类型判定）
+  引用 → 6.2.2.10 输出: passthroughRole / dSymbolContext（若含直通）
+
+【不展开】
+  6.2.2.2 / 6.2.2.9 / 6.2.2.10 的内部入参不重复
+
+────────────────────────────────────────
+6.2.2.4 信道和载波
+建议 API: slbValidateNchLchPair / slbCalculateWorkingSubcarrierGroupBound / slbMapBaseSubcarrierGroupIndex
+────────────────────────────────────────
+【本模块输出】
+  baseChannelBwMHz           基础信道带宽 = 20 MHz
+  subcarrierCount            每基础载波子载波数 = 161
+  dcSubcarrierIndex          DC 子载波索引 = 80（恒不映射）
+  baseSubcarrierGroupCount   基础子载波组数 = 16（每组 10 有效子载波）
+  nCh                        节点工作信道数 N_CH（18 档之一）
+  lCh                        L_CH（与 N_CH 配对）
+  workingScgMaxIndex         工作子载波组上界 = floor(16*nCh/lCh)-1
+  baseScGroupIndex           有效子载波 → 基础子载波组编号（跳过 DC）
+  guardSubcarrierPresent     相邻基础载波间分隔子载波（不映射）
+
+【本模块直接入参】
+  L0: subcarrierCount, dcSubcarrierIndex, baseSubcarrierGroupCount, baseChannelBwMHz
+  L1: nCh, lCh（须落在 18 档配对表）
+  运行时: subcarrierIndex k（0..160）用于组映射
+  引用 → 8.3 输出: centerFreqHz / baseChannelCenterFreqHz（多载波频域布局，仅引用）
+
+【不展开】
+  8.3 内部信道号表不展开
+
+────────────────────────────────────────
+6.2.2.5 天线端口
+建议 API: slbValidateAntennaPortSharing
+────────────────────────────────────────
+【本模块输出】
+  antennaPortIndex           逻辑天线端口 p
+  sharePortCommDomain        通信域同端口约束（SAB/G-PCIB/广播/G-DMRS-C）
+  sharePortPassthrough       直通同节点同端口约束
+
+【本模块直接入参】
+  L1/运行时: antennaPortIndex, domainType（通信域/直通）
+  引用 → 6.2.2.8 输出: commDomainScope（是否落在通信域资源集合）
+  引用 → 6.2.2.10 输出: passthroughRole（先发/后发，直通场景）
+
+────────────────────────────────────────
+6.2.2.6 资源网格
+建议 API: slbBuildResourceGridDims
+────────────────────────────────────────
+【本模块输出】
+  resourceGridDims           网格维度：161 × nSymFrame（每端口/每基础载波/每无线帧）
+  resourceGridBuffer         网格存储句柄（实现侧）
+
+【本模块直接入参】
+  引用 → 6.2.2.2 输出: nSymFrame
+  引用 → 6.2.2.4 输出: subcarrierCount
+  引用 → 6.2.2.5 输出: antennaPortIndex
+
+────────────────────────────────────────
+6.2.2.7 资源元素 RE
+建议 API: slbMapResourceElement / slbValidateResourceElement
+────────────────────────────────────────
+【本模块输出】
+  reIndexKl                  RE 索引 (k,l)_p
+  aKlComplex                 映射复数值 a_{k,l}^{(p)}
+  idleReZero                 未分配 RE → 0
+  dcReForcedZero             a_{80,l} ≡ 0
+
+【本模块直接入参】
+  运行时: subcarrierIndex k, symbolIndex l, complexValue（待写入）
+  引用 → 6.2.2.6 输出: resourceGridDims / resourceGridBuffer
+  引用 → 6.2.2.4 输出: dcSubcarrierIndex
+  引用 → 6.2.2.5 输出: antennaPortIndex
+
+────────────────────────────────────────
+6.2.2.8 通信域
+建议 API: slbSelectCommDomainScope
+────────────────────────────────────────
+【本模块输出】
+  commDomainScope            通信域资源集合标识（含 SAB/G-PCIB/广播/可调度）
+  isLocalGNodeDomain         是否本通信域 G 节点
+
+【本模块直接入参】
+  L1: gNodeId / workingCarrierConfig
+  引用 → 6.2.2.4 输出: nCh, lCh, workingScgMaxIndex（工作载波频域边界）
+  引用 → 6.2.2.2 输出: linkSymbolLayout[]（时域 G/T/A 组织）
+
+────────────────────────────────────────
+6.2.2.9 G/T/附链路
+建议 API: slbSelectGtaLink / slbSelectLinkSymbolType
+────────────────────────────────────────
+【本模块输出】
+  gtaLinkType                G / T / aux（附）链路类型
+  gtaLinkSymbolType          对应符号类型：G符号 / T符号 / A符号
+  txRxRoleAllowed            允许的发送/接收角色
+
+【本模块直接入参】
+  L1/运行时: linkType（逻辑链路）
+  引用 → 6.2.2.8 输出: commDomainScope
+  引用 → 6.2.2.3 输出: switchGapSymbolCount, gLinkMustLeadTti（时分约束）
+
+────────────────────────────────────────
+6.2.2.10 直通链路
+建议 API: slbSelectPassthroughRole
+────────────────────────────────────────
+【本模块输出】
+  passthroughRole            先发节点 / 后发节点
+  dSymbolContext             D 符号 + 切换间隔上下文
+  passthroughCotBound        直通 COT 绑定（起止无线帧）
+
+【本模块直接入参】
+  运行时: contendSuccess, localNodeRole
+  引用 → 6.2.2.3 输出: cotStartRadioFrameIndex, cotEndRadioFrameIndex
+  引用 → 6.2.2.2 输出: nSymFrame, linkSymbolLayout[]（D/switchGap 槽）
